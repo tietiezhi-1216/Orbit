@@ -12,7 +12,7 @@ Legend: 🔲 planned · 🚧 in progress · ✅ done
 
 The launchpad. Nothing orbits until the core exists.
 
-- 🔲 Tauri + Rust + React + shadcn/ui scaffold, cross-platform build
+- ✅ Tauri + Rust + React + shadcn/ui scaffold, cross-platform build
 - 🔲 **Options Engine** — the heart of *"everything is an Option"*: a typed settings registry where any feature can register a switch with a default, persisted locally
 - 🔲 Settings panel UI with searchable, categorized toggles
 - 🔲 Model backend abstraction (the "satellite socket"): a trait/interface a modality model plugs into (local or cloud, configurable)
@@ -94,7 +94,7 @@ Orbit is **decentralized by design**. Priority emerges from issues and contribut
 
 发射台。内核不存在，就没有任何东西能入轨。
 
-- 🔲 Tauri + Rust + React + shadcn/ui 脚手架，跨平台构建
+- ✅ Tauri + Rust + React + shadcn/ui 脚手架，跨平台构建
 - 🔲 **选项引擎（Options Engine）** —— 「一切皆选项」的心脏：一个带类型的设置注册表，任何功能都能注册一个带默认值的开关并本地持久化
 - 🔲 设置面板 UI，支持搜索、分类的开关
 - 🔲 模型后端抽象（「卫星插槽」）：模态模型插入的 trait / 接口（本地或云端，可配置）

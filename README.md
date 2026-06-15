@@ -22,7 +22,7 @@ English · [简体中文](./README.zh-CN.md)
 
 ## ⚠️ Project Status
 
-Orbit is in **early development (pre-alpha)**. This repository currently defines the **vision, architecture, and roadmap**. The Tauri + Rust + React scaffold and the first feature — **voice input** — are landing next. Stars, ideas, and issues are very welcome at this stage; see the [Roadmap](./ROADMAP.md).
+Orbit is in **early development (pre-alpha)**. The **Tauri + Rust + React + shadcn/ui scaffold has landed** — clone it and `pnpm tauri dev` runs a real desktop app today. Next up is the first satellite: **voice input**. Stars, ideas, and issues are very welcome at this stage; see the [Roadmap](./ROADMAP.md).
 
 ---
 
@@ -120,7 +120,7 @@ The goal: dictation that is **fast, private-by-default, hackable, and free**.
 
 ## 🚀 Getting Started
 
-> ⚠️ The scaffold is being set up. These are the intended developer steps and will become live as the first commits land.
+> The scaffold is live — these steps run a real Orbit desktop window today.
 
 ### Prerequisites
 

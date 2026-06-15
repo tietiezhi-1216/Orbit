@@ -18,16 +18,17 @@ The launchpad. Nothing orbits until the core exists.
 - 🔲 Model backend abstraction (the "satellite socket"): a trait/interface a modality model plugs into (local or cloud, configurable)
 - 🔲 Privacy & local-state foundation (secrets, model keys, on-device data)
 
-## M1 · 🎙️ Voice Input — ASR 🔲
+## M1 · 🎙️ Voice Input — ASR 🚧
 
 Orbit's **first mission**. System-wide dictation that beats the incumbents.
 
-- 🔲 Global hotkey capture + low-latency audio pipeline (Rust)
-- 🔲 Pluggable ASR backends: local (e.g. whisper.cpp-class) **and** cloud, switchable
-- 🔲 Optional LLM post-processing (cleanup, punctuation, formatting) — toggleable, *not* mandatory like Openless
-- 🔲 Latency budget & streaming partial results — explicitly faster than Openless
-- 🔲 Deep configurability as Options: model, language, formatting rules, hotkey, push-to-talk vs toggle, insertion target
+- ✅ Global hotkey capture (single right-⌘ or any recorded key) + audio pipeline (Rust/cpal)
+- ✅ Pluggable ASR backends via the provider system — OpenAI **HTTP** + **Realtime WebSocket**, switchable per model (self-hosted/local backends plug in next)
+- ✅ Optional LLM post-processing (polish) — toggleable, *not* mandatory like Openless
+- ✅ Realtime streaming partial results surfaced live in the recording pill
+- ✅ Deep configurability as Options: provider, model, transport, language, hotkey, auto-insert, prompt templates + insertion placeholder
 - 🔲 Benchmark suite vs **Typeless** & **Openless** (latency, accuracy, configurability) published in-repo
+- 🔲 End-to-end runtime validation + local (whisper.cpp-class) ASR backend
 
 ## M2 · 🔊 Voice Output — TTS 🔲
 
@@ -100,16 +101,17 @@ Orbit is **decentralized by design**. Priority emerges from issues and contribut
 - 🔲 模型后端抽象（「卫星插槽」）：模态模型插入的 trait / 接口（本地或云端，可配置）
 - 🔲 隐私与本地状态地基（密钥、模型 Key、端侧数据）
 
-## M1 · 🎙️ 语音输入 —— ASR 🔲
+## M1 · 🎙️ 语音输入 —— ASR 🚧
 
 Orbit 的**第一站**。超越现有产品的全局听写。
 
-- 🔲 全局热键捕获 + 低延迟音频管线（Rust）
-- 🔲 可插拔 ASR 后端：本地（如 whisper.cpp 一类）**与**云端，可切换
-- 🔲 可选的 LLM 后处理（清洗、标点、格式化）—— 可开关，而非像 Openless 那样强制
-- 🔲 延迟预算与流式部分结果 —— 明确比 Openless 更快
-- 🔲 作为选项的深度可配置：模型、语言、格式化规则、热键、按住说话 vs 切换、插入目标
+- ✅ 全局热键捕获（单独右 ⌘ 或任意录制按键）+ 音频管线（Rust/cpal）
+- ✅ 经由 provider 系统的可插拔 ASR 后端 —— OpenAI **HTTP** + **Realtime WebSocket**，按模型切换（自建/本地后端为下一步）
+- ✅ 可选的 LLM 后处理（润色）—— 可开关，而非像 Openless 那样强制
+- ✅ 实时流式部分结果，在录音药丸里实时显示
+- ✅ 作为选项的深度可配置：provider、模型、传输方式、语言、热键、自动输入、提示词模板 + 插入占位符
 - 🔲 对标 **Typeless** 与 **Openless** 的基准测试套件（延迟、准确率、可配置性），在仓库内公开
+- 🔲 端到端真机验证 + 本地（whisper.cpp 一类）ASR 后端
 
 ## M2 · 🔊 语音输出 —— TTS 🔲
 

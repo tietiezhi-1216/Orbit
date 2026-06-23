@@ -2,194 +2,146 @@
 
 # 🛰️ Orbit
 
-**一个开放、多模态、去中心化的 Agent 平台 —— 让每个模型都成为一颗卫星。**
+**一个开放的 macOS 多模态 AI 平台 —— 让每个模型都成为一颗卫星。**
 
 [English](./README.md) · 简体中文
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-f59e0b.svg)](./ROADMAP.md)
-[![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri-24C8DB.svg?logo=tauri)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![React](https://img.shields.io/badge/React-20232A.svg?logo=react&logoColor=61DAFB)](https://react.dev)
-[![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-000000.svg)](https://ui.shadcn.com)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-8b5cf6.svg)](#-参与贡献)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000.svg?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-6-F05138.svg?logo=swift&logoColor=white)](https://swift.org)
+[![SwiftUI](https://img.shields.io/badge/SwiftUI-0A84FF.svg?logo=swift&logoColor=white)](https://developer.apple.com/xcode/swiftui/)
 
 </div>
 
-> **Orbit** —— *寓意「轨道卫星」。* 当下大多数 Agent 软件都止步于**调用层**：Skills、Prompt、MCP 协议，全都围绕一个文本大模型打转。Orbit 把文本、图像、视频、语音（ASR/TTS）、声音模型一起放进围绕同一内核的**共同轨道**——让 Agent 不只是能读会写，更能听、能看、能说、能观。
+> **Orbit** —— *像一颗轨道卫星。* 当下大多数 Agent 软件止步于**调用层**：Skills、Prompt、MCP，全都围绕单一的文本大模型打转。Orbit 想把文本、图像、语音（ASR/TTS）、视频模型放进**同一条轨道**，环绕一个内核 —— 让 Agent 不只是读写，还能听、能看、能说、能观察。
 
 ---
 
 ## ⚠️ 项目状态
 
-Orbit 目前处于**早期开发阶段（pre-alpha）**。**Tauri + Rust + React + shadcn/ui 脚手架已经落地**——克隆下来 `pnpm tauri dev` 今天就能跑起一个真实的桌面应用。下一步是第一颗卫星：**语音输入**。现阶段非常欢迎 Star、点子和 Issue，详见[路线图](./ROADMAP.md)。
+Orbit 处于**早期开发（pre-alpha）**。它是一个用 **Swift / SwiftUI 编写的原生 macOS App**（早期曾用 Tauri 原型验证，后为性能与原生质感重写）。**第一颗卫星 —— 系统级语音输入 —— 已端到端打通**（全局热键 → 录音 → 语音识别 → 可选的大模型润色 → 粘贴进当前 App）。欢迎 Star、提 Issue、贡献想法。
 
 ---
 
 ## 🌍 为什么是 Orbit
 
-今天的「Agent」应用——哪怕是把自家图像、音频模型接进对话循环的优秀产品——几乎都停留在**调用层**。它们暴露的能力无非是：
+今天的 Agent 应用 —— 即便是优秀的那些 —— 大多停留在**调用层**：Skills/工具、Prompt、MCP，全部围绕**单一文本模型**。视觉、语音、视频即便有，也多是临时拼接上去的。
 
-- **Skills / 工具** —— 模型可调用的预定义函数
-- **Prompt** —— 包裹在模型外层的指令
-- **MCP** —— 一套挂接外部上下文与工具的协议
+而现代工作流很少是纯文本的：你会*说话*、*甩一张截图*、*想要朗读出来*、*丢进一段视频*。Orbit 把**每个模态模型都当作平等的卫星**，环绕一个负责在文本/语音/图像/视频之间路由数据的内核 —— 让软件真正能*听、看、说*。
 
-而这一切都围绕**单一文本模型**运转。视觉、语音、视频即便存在，也只是临时拼接的功能，而非运行时的一等公民。
+## 🧠 理念：*一切皆选项*
 
-**Orbit 选择另一条路。** 真实的工作流极少是纯文本的——你会*说话*、会*甩一张截图*、会*想让它念出来*、会*丢进一段视频*。Orbit 把**每一个模态模型都当作对等的卫星**，围绕一个共享的 Rust 内核运行：内核中的路由器与调度器让数据在文本、语音、图像、视频之间自由流动，从而让「有生命力」的软件真正去解决现实中的工作流。
-
----
-
-## ✨ Orbit 的不同之处
-
-| | 常见 Agent 应用 | **Orbit** |
-|---|---|---|
-| **内核** | 单一文本 LLM | 多模态**星座**——文本、视觉、图像生成、声音、视频、ASR/TTS |
-| **集成** | Skills · Prompt · MCP（调用层） | 调用层 **+ 模型织网**，跨模态路由 |
-| **语音** | 附加功能，往往又慢又收费 | 一等公民**卫星**：快、可本地可云端、高度可配置 |
-| **开放性** | 精挑细选、立场鲜明 | **去中心化且开放**——每种意见都能变成一个开关 |
-| **可配置** | 旋钮有限 | **「一切皆选项」**——几乎所有东西都是设置面板里的开关 |
-
----
-
-## 🧠 核心理念：*一切皆选项（Everything is an Option）*
-
-Orbit 的治理模型极度包容：
-
-> **每一个 Issue 都会被采纳。** 无论好坏、无论小众还是热门——我们不拒绝意见，而是**吸纳**它。每条意见都会成为设置面板里的一个**选项（Option）**，用一个 **Switch 开关**收束起来，最终由用户决定。
-
-这正是 Orbit **去中心化**的方式：没有任何单一品味能独断产品方向。默认值保持克制、最小化；掌控权交还用户。互相冲突的需求不必争个你死我活——它们各自作为开关共存。
-
-具体如何落地，见 [参与贡献](#-参与贡献)。
-
----
-
-## 🏗️ 架构
-
-Orbit 的比喻是字面意义上的：一个**内核**，外加若干在轨运行的**卫星**。
-
-```
-                       ╭───────────────────────────────╮
-                       │        Orbit 内核  (Rust)       │
-                       │   模型路由 · 调度器 ·            │
-                       │   选项 / Options 引擎 ·          │
-                       │   本地状态与隐私                 │
-                       ╰───────────────┬───────────────╯
-                   卫星围绕内核运行  ↻  数据自由流动
-   ┌──────────┬──────────┬───────────┴───────┬──────────┬──────────┐
-   ▼          ▼          ▼                   ▼          ▼          ▼
- ┌──────┐ ┌────────┐ ┌──────────┐      ┌─────────┐ ┌───────┐ ┌─────────┐
- │ 文本 │ │  视觉  │ │  图像     │      │  声音   │ │ 视频  │ │ ASR/TTS │
- │ LLM  │ │  理解  │ │  生成     │      │  理解   │ │ 生成  │ │  语音   │
- └──────┘ └────────┘ └──────────┘      └─────────┘ └───────┘ └─────────┘
-                              ▲
-                    ┌─────────┴─────────┐
-                    │  React + shadcn/ui  │   ← 桌面 UI（Tauri webview）
-                    └─────────────────────┘
-```
-
-- **内核**负责路由、调度、选项引擎以及隐私 / 状态，使用 **Rust** 编写，追求高速与极小体积。
-- 每颗**卫星**都是某个模态的可插拔模型后端（本地或云端）。
-- **UI** 是一个 Tauri webview，渲染 **React + shadcn/ui**。
-
-### 技术栈
-
-| 层 | 选型 | 理由 |
-|---|---|---|
-| 应用外壳 | **[Tauri](https://tauri.app)** | 体积小、速度快、安全的原生桌面应用，配 Web UI |
-| 内核 / 后端 | **[Rust](https://www.rust-lang.org)** | 性能、安全、低延迟的音频与模型路由 |
-| UI | **[React](https://react.dev)** | 成熟生态，快速迭代 |
-| 组件 | **[shadcn/ui](https://ui.shadcn.com)** | 无障碍、可主题化、可复制进项目的组件 |
-| 样式 | Tailwind CSS | 与 shadcn/ui 搭配 |
-
-> 随着应用成长，会陆续引入更多常用 React 库（状态管理、数据请求等）。
+> **每个 Issue 都被采纳。** 无论好点子还是小众需求，我们不拒绝意见，而是**吸收**它。在合理的前提下，每个想法都成为设置里的一个**选项（开关）**，带合理的默认值。默认保持精简，控制权交给用户。
 
 ---
 
 ## 🎯 第一站：语音输入
 
-Orbit 的第一颗卫星是**全局语音输入**——在任何地方说话，得到文本。我们明确对标 **Typeless** 与 **Openless**，并瞄准它们的短板逐一超越：
+Orbit 的第一颗卫星是**全局听写** —— 在任何地方说话，得到文字。我们对标 **Typeless** 与 **Openless**，并在它们的短板上发力：
 
-- **Typeless** 是**收费**模式。 → Orbit **开源且免费**。
-- **Openless** 采用「直出直入」+ 大模型转换的模式，但**速度很慢**且**可配置性很差**。 → Orbit 主打**低延迟**与**深度可配置**（模型选择、本地 / 云端、格式化规则、热键、语言、后处理——全部作为选项）。
+- **Typeless** 收费 → Orbit **开源免费**。
+- **Openless** 强制把每段转写都过一遍大模型、且慢 → Orbit 把大模型润色做成**可选**，并主打**低延迟 + 深度可配置**（模型、传输方式、语言、热键、模板，全是选项）。
 
-目标：一套**快、默认隐私优先、可深度定制、且免费**的语音听写。
+**当前用法：**
 
-### 如何使用（已实现）
+1. **添加服务商**（设置 → 服务商）：弹窗填写 名称、协议、Base URL、API Key，「测试连接」会探测 `/models`。支持 OpenAI 兼容端点与 火山引擎 / 豆包语音。
+2. **添加模型**（设置 → 模型）：一个 **ASR** 模型（如 `gpt-4o-transcribe`），以及可选的**大模型**用于润色；选中要用的那个。
+3. **设置热键**（设置 → 听写）：默认右 ⌘，也可录制任意键。可开关自动输入与大模型润色。
+4. **随处听写：** 按热键 → 底部居中出现录音药丸（✗ 取消 · 实时电平 · ✓ 完成）→ 文本粘贴进当前聚焦的 App。
 
-1. **添加 Provider**（设置 → Providers）：名称、Base URL（`https://api.openai.com/v1`）、API Key。「Test」会 ping `/models` 验证。
-2. **添加模型**（设置 → Models）：一个 **ASR** 模型（如 `gpt-4o-transcribe`），传输方式选 **HTTP** 或 **Realtime WebSocket**；可选一个 **LLM** 模型（如 `gpt-4o-mini`）用于润色。选好当前 ASR / LLM 模型。
-3. **设置快捷键**（设置 → Dictation）：默认右 ⌘，也可录制任意按键。可切换**自动输入**与 **LLM 润色**。
-4. **随处听写**：按快捷键 → 屏幕底部中间出现录音药丸（✗ 取消 · 实时电平/部分文本 · ✓ 完成）。再按一次或点 ✓ 进行识别 → 可选 LLM 润色 → 文本自动输入到当前聚焦的应用。
-5. **提示词模板**（设置 → Templates）：可复用的润色提示词，用 `{{transcript}}` 占位符标记识别文本的插入位置。
+> 识别结果通过「写入剪贴板 + 模拟 ⌘V + 还原剪贴板」的方式送出 —— 对中文与长文本又快又稳。
 
-> **macOS 权限：** 听写需要**麦克风**与**辅助功能（Accessibility）**（系统设置 → 隐私与安全性）——后者用于全局热键与自动输入。首次运行时请授予。
+---
+
+## 🏗️ 技术栈
+
+| 层 | 选择 |
+|---|---|
+| 语言 | **Swift 6** |
+| 界面 | **SwiftUI**（辅以少量 AppKit：菜单栏代理、悬浮药丸 `NSPanel`、`NSVisualEffectView` 毛玻璃） |
+| 音频 | **AVFoundation**（`AVAudioEngine` 采集、降混 + 重采样） |
+| 热键 | **CGEventTap**（全局，仅读键码） |
+| 网络 | `URLSession`（ASR `multipart` 上传 · chat completions） |
+| 构建 | **Swift Package Manager** —— 无需 Xcode 工程 |
+
+设计上仅支持 macOS。
+
+## 🗂️ 目录结构
+
+```
+Orbit/
+├── Package.swift            # SwiftPM 清单（可执行目标）
+├── Info.plist              # bundle id、LSUIElement、权限文案
+├── build.sh                # 编译 → 组装 .app → 签名 → 运行
+└── Sources/Orbit/
+    ├── App/                 # 入口、AppDelegate、AppController
+    ├── Models/              # Settings（带类型的配置文档）
+    ├── Persistence/         # SettingsStore（JSON，防抖写盘）
+    ├── Networking/          # 服务商探测（测试 / 拉取模型列表）
+    ├── Dictation/           # 引擎、音频、ASR、润色、粘贴、热键、药丸
+    ├── Support/             # 权限、键码、错误
+    └── UI/                  # SwiftUI 设置窗口
+```
 
 ---
 
 ## 🚀 快速开始
 
-> 脚手架已就绪——以下步骤今天就能跑起一个真实的 Orbit 桌面窗口。
+### 前置要求
 
-### 环境要求
+- **macOS 14+**（在 macOS 26、Apple Silicon 上开发）
+- 一套 **Swift 6 工具链** —— 完整 **Xcode**，或仅安装**命令行工具**：
+  ```bash
+  xcode-select --install
+  ```
 
-- [Rust](https://www.rust-lang.org/tools/install)（stable）
-- [Node.js](https://nodejs.org) ≥ 20 与 [pnpm](https://pnpm.io)
-- Tauri 所需的平台依赖 —— 见 [Tauri 环境准备指南](https://tauri.app/start/prerequisites/)
+无需 Node、无需 Rust、无需 Xcode 工程。
 
-### 开发
+### 构建与运行
 
 ```bash
 git clone https://github.com/tietiezhi-1216/Orbit.git
 cd Orbit
-pnpm install
-pnpm tauri dev      # 以开发模式运行桌面应用
+./build.sh run        # 编译、组装 Orbit.app、ad-hoc 签名、启动
 ```
 
-### 构建
+Orbit 以**菜单栏代理**形式运行（无 Dock 图标）：在菜单栏找波形图标；首次启动会自动打开设置窗口。
 
-```bash
-pnpm tauri build    # 产出原生发布包
-```
+其他命令：`./build.sh build` · `./build.sh release` · `./build.sh clean`。
+
+### 权限
+
+听写需要两项授权（系统设置 → 隐私与安全性）：
+
+- **麦克风** —— 用于录音。
+- **辅助功能** —— 用于全局热键，以及把结果粘贴进当前 App。
+
+设置 → 权限 & 关于 页会实时显示授权状态，并提供一键授权 / 打开系统设置。
+
+配置以 JSON 存于 `~/Library/Application Support/com.orbit.app/config.json`。
 
 ---
 
 ## 🗺️ 路线图
 
-Orbit 一次发射一颗卫星。概览如下：
+| 阶段 | 主题 |
+|---|---|
+| **M1** | 🎙️ 语音输入（ASR）—— 快速、可配置的听写 |
+| **M2** | 🔊 语音输出（TTS）—— 闭合语音闭环 |
+| **M3** | 👁️ 视觉 —— 图像理解与生成 |
+| **M4** | 🎬 视频 |
+| **M5** | 🪐 编排 —— 把多模态串成工作流 |
+| **M6** | 🌐 开放生态 —— 插件/模型注册表、MCP 桥接 |
 
-| 阶段 | 主题 | 要点 |
-|---|---|---|
-| **M0** | 地基 | Tauri + Rust + React + shadcn/ui 脚手架 · 选项 / Switch 设置引擎 |
-| **M1** | 🎙️ 语音输入（ASR） | 又快又可配置的全局听写 —— 超越 Typeless 与 Openless |
-| **M2** | 🔊 语音输出（TTS） | 朗读回复；打通完整语音闭环 |
-| **M3** | 👁️ 视觉 | 把图像理解与生成做成卫星 |
-| **M4** | 🎬 视频 | 视频理解与生成 |
-| **M5** | 🪐 编排 | 在整个星座中把多模态串成真实工作流 |
-| **M6** | 🌐 开放生态 | 插件 / 模型注册表、MCP 桥接、社区贡献的卫星 |
-
-**[→ 阅读完整路线图](./ROADMAP.md)**
-
----
-
-## 🤝 参与贡献
-
-Orbit 建立在「每种意见都能变成一个开关」之上，这让贡献变得格外友好：
-
-1. **提交 Issue** —— 任何点子、需求或吐槽都可以；我们采纳 Issue，而非拒绝它。
-2. 只要合理，功能就会以**选项（设置里的一个 Switch）**的形式发布，并带有合理默认值，从不强加于人。
-3. **欢迎 PR** —— UI、Rust 内核、模型卫星、文档、翻译，都欢迎。
-
-随着项目成形，正式的 `CONTRIBUTING.md` 与 Issue 模板会陆续补上。
-
----
+**[→ 完整路线图](./ROADMAP.md)**
 
 ## 📄 许可证
 
-[MIT](./LICENSE) © 2026 Orbit contributors。随意使用、fork、发布。
+[MIT](./LICENSE) © 2026 Orbit contributors。
 
 ---
 
 <div align="center">
-<sub>由 🛰️ Tauri · Rust · React · shadcn/ui 构建 —— 把每个模型都送入轨道。</sub>
+<sub>用 🛰️ Swift · SwiftUI · AppKit 原生打造 —— 让每个模型都入轨。</sub>
 </div>

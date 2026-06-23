@@ -1,38 +1,16 @@
-# ---- Node / Frontend ----
-node_modules/
-dist/
-dist-ssr/
-build/
-.vite/
-*.local
+# ---- Swift / SwiftPM ----
+.build/
+.swiftpm/
+DerivedData/
+*.app
 
-# ---- Rust / Tauri ----
-target/
-**/target/
-Cargo.lock.bak
-# Tauri generated files (schemas, etc.)
-src-tauri/gen/
+# ---- macOS ----
+.DS_Store
 
-# ---- Logs ----
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# ---- Editors ----
+.idea/
+*.xcuserstate
 
 # ---- Env & secrets ----
 .env
 .env.*
-!.env.example
-
-# ---- Editors / OS ----
-.vscode/*
-!.vscode/extensions.json
-.idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-Thumbs.db

@@ -12,7 +12,7 @@ Legend: 🔲 planned · 🚧 in progress · ✅ done
 
 The launchpad. Nothing orbits until the core exists.
 
-- ✅ Tauri + Rust + React + shadcn/ui scaffold, cross-platform build
+- ✅ Native macOS app scaffold — Swift + SwiftUI + AppKit, built with Swift Package Manager (no Xcode project)
 - 🔲 **Options Engine** — the heart of *"everything is an Option"*: a typed settings registry where any feature can register a switch with a default, persisted locally
 - 🔲 Settings panel UI with searchable, categorized toggles
 - 🔲 Model backend abstraction (the "satellite socket"): a trait/interface a modality model plugs into (local or cloud, configurable)
@@ -22,10 +22,10 @@ The launchpad. Nothing orbits until the core exists.
 
 Orbit's **first mission**. System-wide dictation that beats the incumbents.
 
-- ✅ Global hotkey capture (single right-⌘ or any recorded key) + audio pipeline (Rust/cpal)
-- ✅ Pluggable ASR backends via the provider system — OpenAI **HTTP** + **Realtime WebSocket**, switchable per model (self-hosted/local backends plug in next)
+- ✅ Global hotkey capture (single right-⌘ or any recorded key) + audio pipeline (AVAudioEngine)
+- ✅ Pluggable ASR backends via the provider system — OpenAI-compatible **HTTP** today; **Realtime WebSocket** + 火山引擎 streaming next
 - ✅ Optional LLM post-processing (polish) — toggleable, *not* mandatory like Openless
-- ✅ Realtime streaming partial results surfaced live in the recording pill
+- ✅ Reliable insertion via clipboard paste (fast for CJK / long text)
 - ✅ Deep configurability as Options: provider, model, transport, language, hotkey, auto-insert, prompt templates + insertion placeholder
 - 🔲 Benchmark suite vs **Typeless** & **Openless** (latency, accuracy, configurability) published in-repo
 - 🔲 End-to-end runtime validation + local (whisper.cpp-class) ASR backend
@@ -95,7 +95,7 @@ Orbit is **decentralized by design**. Priority emerges from issues and contribut
 
 发射台。内核不存在，就没有任何东西能入轨。
 
-- ✅ Tauri + Rust + React + shadcn/ui 脚手架，跨平台构建
+- ✅ 原生 macOS App 脚手架 —— Swift + SwiftUI + AppKit，用 Swift Package Manager 构建（无需 Xcode 工程）
 - 🔲 **选项引擎（Options Engine）** —— 「一切皆选项」的心脏：一个带类型的设置注册表，任何功能都能注册一个带默认值的开关并本地持久化
 - 🔲 设置面板 UI，支持搜索、分类的开关
 - 🔲 模型后端抽象（「卫星插槽」）：模态模型插入的 trait / 接口（本地或云端，可配置）
@@ -105,10 +105,10 @@ Orbit is **decentralized by design**. Priority emerges from issues and contribut
 
 Orbit 的**第一站**。超越现有产品的全局听写。
 
-- ✅ 全局热键捕获（单独右 ⌘ 或任意录制按键）+ 音频管线（Rust/cpal）
-- ✅ 经由 provider 系统的可插拔 ASR 后端 —— OpenAI **HTTP** + **Realtime WebSocket**，按模型切换（自建/本地后端为下一步）
+- ✅ 全局热键捕获（单独右 ⌘ 或任意录制按键）+ 音频管线（AVAudioEngine）
+- ✅ 经由 provider 系统的可插拔 ASR 后端 —— 当前 OpenAI 兼容 **HTTP**；**Realtime WebSocket** 与 火山引擎 流式为下一步
 - ✅ 可选的 LLM 后处理（润色）—— 可开关，而非像 Openless 那样强制
-- ✅ 实时流式部分结果，在录音药丸里实时显示
+- ✅ 可靠的文本插入：剪贴板粘贴（对中文/长文本又快又稳）
 - ✅ 作为选项的深度可配置：provider、模型、传输方式、语言、热键、自动输入、提示词模板 + 插入占位符
 - 🔲 对标 **Typeless** 与 **Openless** 的基准测试套件（延迟、准确率、可配置性），在仓库内公开
 - 🔲 端到端真机验证 + 本地（whisper.cpp 一类）ASR 后端

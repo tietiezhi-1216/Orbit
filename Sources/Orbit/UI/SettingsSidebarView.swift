@@ -11,8 +11,7 @@ struct SettingsSidebarView: View {
         VStack(alignment: .leading, spacing: 1) {
             // Brand — pushed down so it clears the window traffic lights.
             HStack(spacing: 8) {
-                Text("🛰️").font(.system(size: 16))
-                Text("Orbit").font(.system(size: 15, weight: .semibold))
+                OrbitBrandTitle(iconSize: 20, fontSize: 15)
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)

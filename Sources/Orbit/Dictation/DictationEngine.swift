@@ -35,6 +35,7 @@ final class DictationEngine {
 
     private var active = false
     private var finishing = false
+    private var processingTask: Task<Void, Never>?
 
     private let httpRate = 16_000
 
@@ -42,19 +43,33 @@ final class DictationEngine {
         self.store = store
         pill.onCancel = { [weak self] in self?.cancel() }
         pill.onCommit = { [weak self] in self?.commit() }
+        pill.onNoticeAction = { [weak self] in self?.cancel() }
     }
 
     // MARK: - Entry points
 
     func toggle() {
+        if finishing {
+            showProcessingNotice()
+            return
+        }
         if active { commit() } else { start() }
+    }
+
+    func handleEscape() {
+        if active || pill.isNoticeVisible {
+            cancel()
+        }
     }
 
     func start() {
         guard !active else { return }
         active = true
         finishing = false
+        processingTask?.cancel()
+        processingTask = nil
         sink.reset()
+        pill.hideNotice()
         pill.show()
         pill.update(status: .recording, text: "", level: 0)
 
@@ -100,19 +115,19 @@ final class DictationEngine {
         let samples = sink.drain()
         if samples.isEmpty { finishIdle(); return }
 
-        pill.update(status: .transcribing, text: "", level: 0)
+        pill.hide()
         let settings = store.settings
         let rate = httpRate
 
-        Task { @MainActor in
+        processingTask = Task { @MainActor in
             do {
                 let wav = WAV.encode(samples, rate: rate)
                 var text = try await Transcriber.http(resolved, wav: wav)
+                try Task.checkCancellation()
 
                 if settings.llmPolishEnabled,
                    let llm = settings.llmModel,
                    let resolvedLLM = settings.resolve(llm) {
-                    pill.update(status: .polishing, text: text, level: 0)
                     let template = settings.activeTemplate?.template
                         ?? "{{\(settings.insertPosition)}}"
                     if let polished = try? await LLM.polish(
@@ -123,12 +138,15 @@ final class DictationEngine {
                     ), !polished.isEmpty {
                         text = polished
                     }
+                    try Task.checkCancellation()
                 }
 
                 if settings.autoInsert, !text.isEmpty {
-                    pill.update(status: .inserting, text: text, level: 0)
+                    try Task.checkCancellation()
                     TextInserter.insert(text)
                 }
+                finishIdle()
+            } catch is CancellationError {
                 finishIdle()
             } catch {
                 fail("识别失败：\(error.localizedDescription)")
@@ -139,6 +157,8 @@ final class DictationEngine {
     func cancel() {
         capture?.stop()
         capture = nil
+        processingTask?.cancel()
+        processingTask = nil
         sink.reset()
         finishIdle()
     }
@@ -147,18 +167,49 @@ final class DictationEngine {
 
     private func fail(_ message: String) {
         NSLog("[dictation] \(message)")
-        pill.update(status: .error, text: message, level: 0)
         capture?.stop()
         capture = nil
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            finishIdle()
+        processingTask?.cancel()
+        processingTask = nil
+        active = false
+        finishing = false
+        pill.hide()
+
+        let notice = noticeParts(from: message)
+        pill.showNotice(
+            title: notice.title,
+            message: notice.message,
+            actionTitle: "关闭",
+            autoDismissAfter: 4
+        )
+    }
+
+    private func showProcessingNotice() {
+        pill.showNotice(
+            title: "Orbit仍在处理您的上一个转录",
+            message: "如果您想取消上一个转录，请按 Esc 或点击下面。",
+            actionTitle: "取消"
+        )
+    }
+
+    private func noticeParts(from message: String) -> (title: String, message: String) {
+        for separator in ["：", "，", ":"] {
+            if let range = message.range(of: separator) {
+                let title = String(message[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let body = String(message[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty, !body.isEmpty {
+                    return (title, body)
+                }
+            }
         }
+        return ("Orbit遇到问题", message)
     }
 
     private func finishIdle() {
         active = false
         finishing = false
+        processingTask = nil
         pill.hide()
+        pill.hideNotice()
     }
 }

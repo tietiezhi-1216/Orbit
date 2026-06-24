@@ -14,6 +14,8 @@ final class HotkeyMonitor {
     var onCaptured: ((String) -> Void)?
     /// Fires when the bound hotkey is pressed.
     var onHotkey: (() -> Void)?
+    /// Fires when Esc is pressed, used to dismiss/cancel the dictation overlay.
+    var onEscape: (() -> Void)?
 
     private var capturing = false
     private var hotkey: String
@@ -106,6 +108,8 @@ final class HotkeyMonitor {
         }
         if String(code) == hotkey {
             DispatchQueue.main.async { [weak self] in self?.onHotkey?() }
+        } else if code == 53 {
+            DispatchQueue.main.async { [weak self] in self?.onEscape?() }
         }
     }
 }

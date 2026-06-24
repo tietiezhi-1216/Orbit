@@ -34,6 +34,7 @@ assemble() {
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp "$bin/$APP_NAME" "$app/Contents/MacOS/$APP_NAME"
     cp "Info.plist" "$app/Contents/Info.plist"
+    cp "Assets/Brand/Orbit.icns" "$app/Contents/Resources/Orbit.icns"
     codesign --force --sign - "$app" >/dev/null 2>&1 || true
 
     echo "✅ $app"

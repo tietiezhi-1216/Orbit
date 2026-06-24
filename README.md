@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛰️ Orbit
+<img src="./Assets/Brand/orbit-readme-logo.svg" alt="Orbit" width="620">
 
 **An open, multimodal AI platform for macOS — where every model is a satellite.**
 
@@ -71,6 +71,7 @@ It's macOS-only by design.
 
 ```
 Orbit/
+├── Assets/Brand/            # app icon, README logo, source SVGs
 ├── Package.swift            # SwiftPM manifest (executable target)
 ├── Info.plist              # bundle id, LSUIElement, usage strings
 ├── build.sh                # build → assemble .app → sign → run

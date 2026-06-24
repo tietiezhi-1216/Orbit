@@ -16,8 +16,7 @@ struct ChatSidebarView: View {
         VStack(spacing: 0) {
             // Brand — pushed below the traffic lights.
             HStack(spacing: 8) {
-                Text("🛰️").font(.system(size: 16))
-                Text("Orbit").font(.system(size: 15, weight: .semibold))
+                OrbitBrandTitle(iconSize: 20, fontSize: 15)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)

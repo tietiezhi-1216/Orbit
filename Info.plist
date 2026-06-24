@@ -6,6 +6,8 @@
 	<string>Orbit</string>
 	<key>CFBundleDisplayName</key>
 	<string>Orbit</string>
+	<key>CFBundleIconFile</key>
+	<string>Orbit.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.orbit.app</string>
 	<key>CFBundleExecutable</key>

@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.finishHotkeyCapture(keycode: code)
         }
         monitor.onHotkey = { [weak engine] in engine?.toggle() }
+        monitor.onEscape = { [weak engine] in engine?.handleEscape() }
 
         monitor.start()
     }

@@ -24,23 +24,19 @@ enum LLM {
         guard !model.apiKey.trimmed.isEmpty else {
             throw OrbitError("所选大模型服务商缺少 API Key。")
         }
-        let base = model.baseURL.trimmingTrailingSlash
-        guard let url = URL(string: base + "/chat/completions") else {
+        guard let url = model.api.chatURL(base: model.baseURL) else {
             throw OrbitError("大模型 Base URL 无效。")
         }
         let content = render(template: template, placeholder: placeholder, transcript: transcript)
+        let messages = [ChatMessage(role: .user, content: content)]
 
-        let payload: [String: Any] = [
-            "model": model.model,
-            "messages": [["role": "user", "content": content]],
-            "temperature": 0.3,
-        ]
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 60
-        req.setValue("Bearer \(model.apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        model.api.authorize(&req, apiKey: model.apiKey)
+        req.httpBody = try JSONSerialization.data(withJSONObject:
+            ChatClient.payload(model: model, messages: messages, stream: false, temperature: 0.3))
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -48,10 +44,30 @@ enum LLM {
             let text = String(data: data, encoding: .utf8) ?? ""
             throw OrbitError("大模型请求失败（\(code)）：\(text.prefix(300))")
         }
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let choices = json?["choices"] as? [[String: Any]]
-        let message = choices?.first?["message"] as? [String: Any]
-        let text = (message?["content"] as? String) ?? ""
-        return text.trimmed
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return extractText(json, protocol: model.api).trimmed
+    }
+
+    /// Pull the assistant text out of a non-streaming response per protocol.
+    private static func extractText(_ json: [String: Any], protocol api: APIProtocol) -> String {
+        switch api {
+        case .openAIChat:
+            let choices = json["choices"] as? [[String: Any]]
+            let message = choices?.first?["message"] as? [String: Any]
+            return (message?["content"] as? String) ?? ""
+        case .openAIResponses:
+            if let direct = json["output_text"] as? String { return direct }
+            // Otherwise concatenate the `output_text` blocks inside `output[]`.
+            let output = json["output"] as? [[String: Any]] ?? []
+            return output.flatMap { ($0["content"] as? [[String: Any]]) ?? [] }
+                .filter { ($0["type"] as? String) == "output_text" }
+                .compactMap { $0["text"] as? String }
+                .joined()
+        case .anthropic:
+            let blocks = json["content"] as? [[String: Any]] ?? []
+            return blocks.filter { ($0["type"] as? String) == "text" }
+                .compactMap { $0["text"] as? String }
+                .joined()
+        }
     }
 }

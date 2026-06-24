@@ -21,13 +21,18 @@ enum ProviderAPIError: LocalizedError {
 
 enum ProviderAPI {
 
-    /// Ping `/models` to validate base URL + API key. Returns a status string.
+    /// Ping the provider's models endpoint to validate base URL + API key.
     static func test(_ provider: Provider) async throws -> String {
-        let (status, _) = try await getModels(provider)
-        return status == 200 ? "连接正常" : "HTTP \(status)"
+        let (status, body) = try await getModels(provider)
+        guard status == 200 else {
+            throw ProviderAPIError.http(status, String(data: body, encoding: .utf8) ?? "")
+        }
+        return "连接正常"
     }
 
-    /// List the model ids the provider exposes via `GET /models`.
+    /// List the model ids the provider exposes. Both the OpenAI `GET /models`
+    /// and Anthropic `GET /v1/models` responses share a `{ data: [{ id }] }`
+    /// shape, so one parser covers all protocols.
     static func fetchModels(_ provider: Provider) async throws -> [String] {
         let (status, body) = try await getModels(provider)
         guard status == 200 else {
@@ -42,11 +47,10 @@ enum ProviderAPI {
     // MARK: - Internal
 
     private static func getModels(_ provider: Provider) async throws -> (Int, Data) {
-        let base = provider.baseURL.trimmingTrailingSlash
-        guard let url = URL(string: base + "/models") else { throw ProviderAPIError.badURL }
+        guard let url = provider.modelsEndpoint else { throw ProviderAPIError.badURL }
         var req = URLRequest(url: url)
         req.timeoutInterval = 15
-        req.setValue("Bearer \(provider.apiKey)", forHTTPHeaderField: "Authorization")
+        provider.api.authorize(&req, apiKey: provider.apiKey)
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

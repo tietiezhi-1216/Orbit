@@ -1,7 +1,7 @@
 //  AppDelegate.swift
 //  Wires the app together: the settings store, the chat store, the controller the
-//  UI talks to, a menu-bar status item, the primary Chat window and the secondary
-//  Settings window, plus the dictation engine + global hotkey.
+//  UI talks to, a menu-bar status item, the primary Orbit window, plus the
+//  dictation engine + global hotkey.
 
 import AppKit
 import SwiftUI
@@ -87,7 +87,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
-    @objc private func openChat(_ sender: Any?) { showChat() }
+    @objc private func openChat(_ sender: Any?) {
+        controller.openChatWorkspace()
+        showChat()
+    }
     @objc private func toggleDictation(_ sender: Any?) { controller.toggleDictation() }
     @objc private func quit(_ sender: Any?) { NSApp.terminate(nil) }
 
@@ -121,11 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chatWindow?.makeKeyAndOrderFront(nil)
     }
 
-    /// Settings open as a sheet inside the chat window (not a separate window).
+    /// Settings switch into the main Orbit window.
     @objc func showSettings(_ sender: Any?) {
-        controller.refreshStatus()
         showChat()
-        controller.settingsPresented = true
+        controller.openSettingsWorkspace()
     }
 
     // MARK: - Main menu

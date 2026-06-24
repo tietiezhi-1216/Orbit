@@ -19,9 +19,6 @@ final class ChatStore: ObservableObject {
 
     init(settings: SettingsStore) {
         self.settings = settings
-        let convo = Conversation()
-        conversations = [convo]
-        selectedID = convo.id
     }
 
     var selected: Conversation? {
@@ -44,19 +41,13 @@ final class ChatStore: ObservableObject {
 
     func newConversation() {
         cancel()
-        let convo = Conversation()
-        conversations.insert(convo, at: 0)
-        selectedID = convo.id
+        selectedID = nil
     }
 
     func deleteConversation(id: UUID) {
         if streamingConversationID == id { cancel() }
         conversations.removeAll { $0.id == id }
-        if conversations.isEmpty {
-            let convo = Conversation()
-            conversations = [convo]
-            selectedID = convo.id
-        } else if selectedID == id {
+        if selectedID == id {
             selectedID = conversations.first?.id
         }
     }
@@ -91,8 +82,19 @@ final class ChatStore: ObservableObject {
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
-        guard let cid = selectedID,
-              let ci = conversations.firstIndex(where: { $0.id == cid }) else { return }
+        let ci: Int
+        let cid: UUID
+
+        if let selectedID, let existingIndex = conversations.firstIndex(where: { $0.id == selectedID }) {
+            ci = existingIndex
+            cid = selectedID
+        } else {
+            let convo = Conversation()
+            conversations.insert(convo, at: 0)
+            selectedID = convo.id
+            ci = 0
+            cid = convo.id
+        }
 
         conversations[ci].messages.append(ChatMessage(role: .user, content: trimmed))
         if conversations[ci].title == "新对话" {

@@ -7,21 +7,26 @@ import SwiftUI
 
 /// Shared layout metrics so every page lines up.
 enum Layout {
-    /// Top inset for the page header (settings render inside a sheet now, so
-    /// there are no traffic lights to clear).
-    static let topInset: CGFloat = 16
-    static let horizontalPadding: CGFloat = 24
+    /// Top inset for in-window workspace headers.
+    static let topInset: CGFloat = 54
+    static let horizontalPadding: CGFloat = 40
+    static let contentMaxWidth: CGFloat = 760
 }
 
 struct PageScaffold<Toolbar: View, Content: View>: View {
     let title: String
+    /// Upper bound on content width. Forms stay readable at the default; wide
+    /// surfaces (e.g. the providers table) pass a larger value or `.infinity`.
+    let maxWidth: CGFloat
     let toolbar: Toolbar
     let content: Content
 
     init(title: String,
+         maxWidth: CGFloat = Layout.contentMaxWidth,
          @ViewBuilder toolbar: () -> Toolbar,
          @ViewBuilder content: () -> Content) {
         self.title = title
+        self.maxWidth = maxWidth
         self.toolbar = toolbar()
         self.content = content()
     }
@@ -30,24 +35,27 @@ struct PageScaffold<Toolbar: View, Content: View>: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                 Spacer(minLength: 0)
                 toolbar
             }
-            .padding(.horizontal, Layout.horizontalPadding)
             .padding(.top, Layout.topInset)
-            .padding(.bottom, 14)
+            .padding(.bottom, 16)
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: maxWidth, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, Layout.horizontalPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
 extension PageScaffold where Toolbar == EmptyView {
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.init(title: title, toolbar: { EmptyView() }, content: content)
+    init(title: String,
+         maxWidth: CGFloat = Layout.contentMaxWidth,
+         @ViewBuilder content: () -> Content) {
+        self.init(title: title, maxWidth: maxWidth, toolbar: { EmptyView() }, content: content)
     }
 }

@@ -1,6 +1,8 @@
 //  ProvidersView.swift
-//  Manage OpenAI-compatible providers as a table: name, Base URL, masked API
-//  Key. Add / edit happen in a modal sheet (SwiftUI Table is read-only).
+//  Manage providers as a SwiftUI `Table`: name, protocol, Base URL, masked API
+//  Key. Rendered with the bordered table style (a bezeled box, no row stripes).
+//  Columns carry no fixed width, so they auto-size and spread to fill. Add /
+//  edit happen in a modal sheet (SwiftUI Table is read-only).
 
 import SwiftUI
 
@@ -17,7 +19,7 @@ struct ProvidersView: View {
     }
 
     var body: some View {
-        PageScaffold(title: "服务商") {
+        PageScaffold(title: "服务商", maxWidth: .infinity) {
             HStack(spacing: 8) {
                 Button {
                     if let p = selectedProvider { editingProvider = p }
@@ -44,12 +46,16 @@ struct ProvidersView: View {
         } content: {
             Table(store.settings.providers, selection: $selectedID) {
                 TableColumn("名称", value: \.name)
+                TableColumn("协议") { provider in
+                    Text(provider.api.displayName).foregroundStyle(.secondary)
+                }
                 TableColumn("Base URL", value: \.baseURL)
                 TableColumn("API Key") { provider in
                     Text(provider.apiKey.isEmpty ? "—" : "••••••••")
                         .foregroundStyle(.secondary)
                 }
             }
+            .tableStyle(.bordered(alternatesRowBackgrounds: false))
             .contextMenu(forSelectionType: Provider.ID.self) { ids in
                 if let id = ids.first,
                    let provider = store.settings.providers.first(where: { $0.id == id }) {
@@ -59,15 +65,19 @@ struct ProvidersView: View {
                         if selectedID == id { selectedID = nil }
                     }
                 }
+            } primaryAction: { ids in
+                if let id = ids.first,
+                   let provider = store.settings.providers.first(where: { $0.id == id }) {
+                    editingProvider = provider
+                }
             }
             .overlay {
                 if store.settings.providers.isEmpty {
-                    Text("还没有服务商，点右上角「添加服务商」开始。")
+                    Text("还没有服务商,点右上角「添加服务商」开始。")
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.bottom, 16)
         }
         .sheet(isPresented: $showingAdd) {
             AddProviderSheet { newProvider in
@@ -80,6 +90,7 @@ struct ProvidersView: View {
                     existing.name = updated.name
                     existing.baseURL = updated.baseURL
                     existing.apiKey = updated.apiKey
+                    existing.api = updated.api
                 }
             }
         }

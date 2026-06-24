@@ -4,30 +4,31 @@
 import SwiftUI
 
 /// A secure text field with an eye toggle to reveal the value (for API keys).
+/// The toggle is a dedicated trailing control sitting just outside the field —
+/// so it never overlaps the field's border or the typed text.
 struct RevealableSecureField: View {
     let title: String
     @Binding var text: String
     @State private var reveal = false
 
     var body: some View {
-        // The reveal toggle lives INSIDE the field's trailing edge, so the field
-        // is the same width as the plain fields around it.
-        Group {
-            if reveal {
-                TextField(title, text: $text)
-            } else {
-                SecureField(title, text: $text)
+        HStack(spacing: 6) {
+            Group {
+                if reveal {
+                    TextField(title, text: $text)
+                } else {
+                    SecureField(title, text: $text)
+                }
             }
-        }
-        .textFieldStyle(.roundedBorder)
-        .overlay(alignment: .trailing) {
+            .textFieldStyle(.roundedBorder)
+
             Button {
                 reveal.toggle()
             } label: {
                 Image(systemName: reveal ? "eye.slash" : "eye")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .padding(.trailing, 6)
+                    .frame(width: 24, height: 22)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -1,13 +1,15 @@
 //  ChatClient.swift
-//  Streaming chat completions against an OpenAI-compatible endpoint. Used by the
-//  chat (Agent) surface. Dictation's LLM.polish stays separate and untouched.
+//  Streaming chat against a provider, branching on its wire protocol:
+//  OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. All three
+//  speak Server-Sent Events (`data: {json}` lines); only the request body and
+//  the per-chunk shape differ.
 
 import Foundation
 
 enum ChatClient {
 
-    /// Stream a chat completion, delivering each content delta to `onDelta` on
-    /// the main actor. Throws on bad config / non-200 / transport error.
+    /// Stream a reply, delivering each content delta to `onDelta` on the main
+    /// actor. Throws on bad config / non-200 / transport error.
     static func stream(
         model: ResolvedModel,
         messages: [ChatMessage],
@@ -16,23 +18,7 @@ enum ChatClient {
         guard !model.apiKey.trimmed.isEmpty else {
             throw OrbitError("所选大模型服务商缺少 API Key。")
         }
-        let base = model.baseURL.trimmingTrailingSlash
-        guard let url = URL(string: base + "/chat/completions") else {
-            throw OrbitError("大模型 Base URL 无效。")
-        }
-
-        let payload: [String: Any] = [
-            "model": model.model,
-            "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
-            "stream": true,
-            "temperature": 0.7,
-        ]
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 120
-        req.setValue("Bearer \(model.apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let req = try buildRequest(model: model, messages: messages, stream: true)
 
         let (bytes, resp) = try await URLSession.shared.bytes(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -45,8 +31,8 @@ enum ChatClient {
             throw OrbitError("大模型请求失败（\(code)）：\(body.prefix(300))")
         }
 
-        // Server-Sent Events: each event is a `data: {json}` line, terminated by
-        // `data: [DONE]`. Blank/keep-alive lines and malformed chunks are skipped.
+        // Each SSE event is a `data: {json}` line. Blank / keep-alive / `event:`
+        // lines and malformed chunks are skipped.
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let chunk = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -55,17 +41,111 @@ enum ChatClient {
             guard let data = chunk.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
-            // Some providers open the stream with HTTP 200 then send an error
-            // object mid-stream — surface it instead of ending silently empty.
-            if let err = json["error"] as? [String: Any] {
-                throw OrbitError("大模型返回错误：\((err["message"] as? String) ?? "未知错误")")
+
+            switch try parse(json, protocol: model.api) {
+            case .delta(let piece): if !piece.isEmpty { await onDelta(piece) }
+            case .done: return
+            case .ignore: continue
             }
+        }
+    }
+
+    // MARK: - Request building
+
+    static func buildRequest(model: ResolvedModel, messages: [ChatMessage], stream: Bool) throws -> URLRequest {
+        guard let url = model.api.chatURL(base: model.baseURL) else {
+            throw OrbitError("大模型 Base URL 无效。")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        model.api.authorize(&req, apiKey: model.apiKey)
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: payload(model: model, messages: messages, stream: stream, temperature: 0.7)
+        )
+        return req
+    }
+
+    /// Build the protocol-specific request body.
+    static func payload(model: ResolvedModel, messages: [ChatMessage],
+                        stream: Bool, temperature: Double) -> [String: Any] {
+        switch model.api {
+        case .openAIChat:
+            return [
+                "model": model.model,
+                "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
+                "stream": stream,
+                "temperature": temperature,
+            ]
+        case .openAIResponses:
+            var p: [String: Any] = [
+                "model": model.model,
+                "input": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
+                "temperature": temperature,
+            ]
+            if stream { p["stream"] = true }
+            return p
+        case .anthropic:
+            // Anthropic carries the prompt's system text as a top-level field;
+            // `messages` holds only the user / assistant turns.
+            let system = messages.filter { $0.role == .system }
+                .map(\.content).joined(separator: "\n\n")
+            let turns = messages.filter { $0.role != .system }
+                .map { ["role": $0.role.rawValue, "content": $0.content] }
+            var p: [String: Any] = [
+                "model": model.model,
+                "messages": turns,
+                "max_tokens": 4096,
+                "temperature": temperature,
+            ]
+            if stream { p["stream"] = true }
+            if !system.isEmpty { p["system"] = system }
+            return p
+        }
+    }
+
+    // MARK: - Stream parsing
+
+    private enum Event { case delta(String), done, ignore }
+
+    private static func parse(_ json: [String: Any], protocol api: APIProtocol) throws -> Event {
+        // A top-level `error` object can arrive mid-stream on any protocol
+        // (the server opened with 200 then failed). Surface it uniformly.
+        if let err = json["error"] as? [String: Any] {
+            throw OrbitError("大模型返回错误：\((err["message"] as? String) ?? "未知错误")")
+        }
+        switch api {
+        case .openAIChat:
             guard let choices = json["choices"] as? [[String: Any]],
                   let delta = choices.first?["delta"] as? [String: Any],
-                  let piece = delta["content"] as? String,
-                  !piece.isEmpty
-            else { continue }
-            await onDelta(piece)
+                  let piece = delta["content"] as? String
+            else { return .ignore }
+            return .delta(piece)
+
+        case .openAIResponses:
+            switch json["type"] as? String {
+            case "response.output_text.delta":
+                return .delta((json["delta"] as? String) ?? "")
+            case "response.completed":
+                return .done
+            case "response.failed", "response.incomplete":
+                let e = (json["response"] as? [String: Any])?["error"] as? [String: Any]
+                throw OrbitError("大模型返回错误：\((e?["message"] as? String) ?? "未知错误")")
+            default:
+                return .ignore
+            }
+
+        case .anthropic:
+            switch json["type"] as? String {
+            case "content_block_delta":
+                let delta = json["delta"] as? [String: Any]
+                return .delta((delta?["text"] as? String) ?? "")
+            case "message_stop":
+                return .done
+            default:
+                return .ignore
+            }
         }
     }
 }

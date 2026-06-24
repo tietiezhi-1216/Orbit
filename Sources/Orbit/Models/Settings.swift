@@ -20,29 +20,119 @@ enum Transport: String, Codable, Hashable {
     case http
 }
 
+// MARK: - API protocol
+
+/// The wire format a provider speaks. Decides the endpoint path, the auth
+/// header, and the request / response shape. A provider may be OpenAI-style
+/// (`/chat/completions` or the newer `/responses`) or Anthropic-style
+/// (`/v1/messages`).
+enum APIProtocol: String, Codable, Hashable, CaseIterable, Identifiable {
+    case openAIChat        // OpenAI Chat Completions  — POST {base}/chat/completions
+    case openAIResponses   // OpenAI Responses         — POST {base}/responses
+    case anthropic         // Anthropic Messages       — POST {base}/v1/messages
+
+    var id: String { rawValue }
+
+    /// Vendor + the provider's real API name, in one consistent shape across all
+    /// three. Shown in the protocol picker and the providers table.
+    var displayName: String {
+        switch self {
+        case .openAIChat:      return "OpenAI Chat Completions"
+        case .openAIResponses: return "OpenAI Responses"
+        case .anthropic:       return "Anthropic Messages"
+        }
+    }
+
+    /// One-line hint under the picker.
+    var summary: String {
+        switch self {
+        case .openAIChat:      return "POST /chat/completions —— 兼容绝大多数服务商"
+        case .openAIResponses: return "POST /responses —— OpenAI 新一代接口"
+        case .anthropic:       return "POST /v1/messages —— Claude 原生接口"
+        }
+    }
+
+    /// Sensible default base URL (also used as the field placeholder).
+    var defaultBaseURL: String {
+        switch self {
+        case .openAIChat, .openAIResponses: return "https://api.openai.com/v1"
+        case .anthropic:                    return "https://api.anthropic.com"
+        }
+    }
+
+    /// Whether the base URL is conventionally expected to carry the version
+    /// segment (OpenAI → yes, the `/v1` lives in the base; Anthropic → no, it
+    /// owns `/v1/...` itself).
+    var expectsVersionInBase: Bool {
+        switch self {
+        case .openAIChat, .openAIResponses: return true
+        case .anthropic:                    return false
+        }
+    }
+
+    var chatPath: String {
+        switch self {
+        case .openAIChat:      return "/chat/completions"
+        case .openAIResponses: return "/responses"
+        case .anthropic:       return "/v1/messages"
+        }
+    }
+
+    var modelsPath: String {
+        switch self {
+        case .openAIChat, .openAIResponses: return "/models"
+        case .anthropic:                    return "/v1/models"
+        }
+    }
+
+    /// Resolve the chat / models endpoint for a given base URL.
+    func chatURL(base: String) -> URL? { endpoint(base, chatPath) }
+    func modelsURL(base: String) -> URL? { endpoint(base, modelsPath) }
+
+    private func endpoint(_ base: String, _ path: String) -> URL? {
+        URL(string: base.trimmed.trimmingTrailingSlash + path)
+    }
+
+    /// Apply the protocol's auth (and any version) headers to a request.
+    func authorize(_ req: inout URLRequest, apiKey: String) {
+        switch self {
+        case .openAIChat, .openAIResponses:
+            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        case .anthropic:
+            req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        }
+    }
+}
+
 // MARK: - Provider
 
 /// A model vendor / endpoint — an OpenAI-compatible base URL + API key.
 struct Provider: Identifiable, Codable, Hashable {
     var id: String
     var name: String
-    /// OpenAI-compatible base URL, e.g. `https://api.openai.com/v1`.
+    /// Base URL the endpoint paths are appended to, e.g. `https://api.openai.com/v1`
+    /// (OpenAI) or `https://api.anthropic.com` (Anthropic).
     var baseURL: String
     var apiKey: String
+    /// The wire protocol this provider speaks.
+    var api: APIProtocol
 
     init(id: String = UUID().uuidString,
          name: String,
          baseURL: String = Provider.openAIBase,
-         apiKey: String = "") {
+         apiKey: String = "",
+         api: APIProtocol = .openAIChat) {
         self.id = id
         self.name = name
         self.baseURL = baseURL
         self.apiKey = apiKey
+        self.api = api
     }
 
     static let openAIBase = "https://api.openai.com/v1"
 
-    private enum CodingKeys: String, CodingKey { case id, name, baseURL, apiKey }
+    private enum CodingKeys: String, CodingKey { case id, name, baseURL, apiKey, api }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,8 +140,14 @@ struct Provider: Identifiable, Codable, Hashable {
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Provider"
         baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? Provider.openAIBase
         apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        // Older configs predate `api` → assume OpenAI-compatible chat.
+        api = (try? c.decode(APIProtocol.self, forKey: .api)) ?? .openAIChat
         // Older configs may carry kind/appID/resourceID — ignored.
     }
+
+    /// Resolve this provider's chat / models endpoint.
+    var chatEndpoint: URL? { api.chatURL(base: baseURL) }
+    var modelsEndpoint: URL? { api.modelsURL(base: baseURL) }
 }
 
 // MARK: - Model
@@ -213,6 +309,7 @@ struct Settings: Codable {
         return ResolvedModel(
             baseURL: p.baseURL,
             apiKey: p.apiKey,
+            api: p.api,
             model: model.model,
             transport: model.transport,
             language: model.language
@@ -224,6 +321,7 @@ struct Settings: Codable {
 struct ResolvedModel {
     let baseURL: String
     let apiKey: String
+    let api: APIProtocol
     let model: String
     let transport: Transport
     let language: String?

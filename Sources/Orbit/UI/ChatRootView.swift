@@ -1,52 +1,93 @@
 //  ChatRootView.swift
 //  Orbit's primary surface: a chat (Agent) window — conversation sidebar + a
-//  message transcript with a composer. Settings open as a sheet ON THIS window
-//  (not a separate window), driven by AppController.settingsPresented.
+//  message transcript with a composer. Settings now switch into the same main
+//  window as a workspace instead of opening as a sheet.
 
 import SwiftUI
+import AppKit
 
 struct ChatRootView: View {
-    /// Retained for menu-bar / external callers; in-window opening uses the flag.
+    /// Retained for menu-bar / external callers.
     let openSettings: () -> Void
 
     @EnvironmentObject private var app: AppController
 
     var body: some View {
-        HStack(spacing: 0) {
-            ChatSidebarView(openSettings: { app.settingsPresented = true })
-            Divider()
-            ChatDetailView(openSettings: { app.settingsPresented = true })
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            switch app.workspace {
+            case .chat:
+                ChatWorkspaceView(openSettings: openSettings)
+            case .settings:
+                SettingsRootView()
+            }
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 960, minHeight: 640)
         .ignoresSafeArea()
-        .sheet(isPresented: $app.settingsPresented) {
-            SettingsSheet()
+    }
+}
+
+private struct ChatWorkspaceView: View {
+    let openSettings: () -> Void
+
+    @State private var sidebarWidth = 292.0
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                ChatSidebarView(openSettings: openSettings)
+                    .frame(width: CGFloat(sidebarWidth))
+
+                ChatDetailView(openSettings: openSettings)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            SidebarResizeHandle(width: $sidebarWidth)
+                .frame(width: 10)
+                .offset(x: CGFloat(sidebarWidth) - 5)
         }
     }
 }
 
-/// The settings UI as a contained modal sheet over the chat window.
-private struct SettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
+private struct SidebarResizeHandle: View {
+    @Binding var width: Double
+    @State private var startWidth: Double?
+    @State private var cursorPushed = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Text("设置").font(.headline)
-                HStack {
-                    Spacer()
-                    Button("完成") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
+        Rectangle()
+            .fill(Color.clear)
+            .contentShape(Rectangle())
+            .overlay {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.28))
+                    .frame(width: 0.5)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if startWidth == nil { startWidth = width }
+                        let next = (startWidth ?? width) + value.translation.width
+                        width = min(max(next, 240), 380)
+                    }
+                    .onEnded { _ in
+                        startWidth = nil
+                    }
+            )
+            .onHover { hovering in
+                if hovering, !cursorPushed {
+                    NSCursor.resizeLeftRight.push()
+                    cursorPushed = true
+                } else if !hovering, cursorPushed {
+                    NSCursor.pop()
+                    cursorPushed = false
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 48)
-
-            Divider()
-
-            SettingsRootView()
-        }
-        .frame(width: 780, height: 560)
+            .onDisappear {
+                if cursorPushed {
+                    NSCursor.pop()
+                    cursorPushed = false
+                }
+            }
+            .help("拖动调整侧边栏宽度")
     }
 }

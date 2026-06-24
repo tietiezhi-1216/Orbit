@@ -1,49 +1,81 @@
 //  SettingsSidebarView.swift
-//  The settings window's translucent left nav: real vibrancy behind, a brand
-//  mark below the traffic lights, and accent-highlighted section rows.
+//  Codex-style in-window settings navigation.
 
 import SwiftUI
 
 struct SettingsSidebarView: View {
-    @Binding var selection: SettingsSection
+    @EnvironmentObject private var app: AppController
+    @State private var searchText = ""
+
+    private var sections: [SettingsSection] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return SettingsSection.allCases
+        }
+
+        let needle = searchText.localizedLowercase
+        return SettingsSection.allCases.filter { section in
+            section.title.localizedLowercase.contains(needle)
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            // Brand — pushed down so it clears the window traffic lights.
-            HStack(spacing: 8) {
-                OrbitBrandTitle(iconSize: 20, fontSize: 15)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                app.openChatWorkspace()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("返回应用")
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 32)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 16)
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .padding(.top, 54)
+            .padding(.horizontal, 10)
             .padding(.bottom, 14)
 
-            ForEach(SettingsSection.allCases) { section in
-                SidebarRow(section: section,
-                           isSelected: selection == section) {
-                    selection = section
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                TextField("搜索设置…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08))
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 18)
+
+            ForEach(sections) { section in
+                SettingsSidebarRow(section: section,
+                                   isSelected: app.settingsSection == section) {
+                    app.settingsSection = section
                 }
             }
 
             Spacer(minLength: 0)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("开放 · 多模态 · 去中心化")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text("让每个模型成为一颗卫星")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
         }
-        .frame(width: 212, alignment: .leading)
+        .frame(width: 260)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(VisualEffectView(material: .sidebar))
     }
 }
 
-private struct SidebarRow: View {
+private struct SettingsSidebarRow: View {
     let section: SettingsSection
     let isSelected: Bool
     let action: () -> Void
@@ -52,32 +84,29 @@ private struct SidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            Label {
+                Text(section.title)
+                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+            } icon: {
                 Image(systemName: section.symbol)
                     .font(.system(size: 13))
-                    .frame(width: 18)
-                Text(section.title)
-                    .font(.system(size: 13))
-                Spacer(minLength: 0)
+                    .frame(width: 17)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(background)
-            )
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .background(background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .onHover { hovering = $0 }
     }
 
     private var background: Color {
-        if isSelected { return .accentColor }
-        if hovering { return .primary.opacity(0.08) }
+        if isSelected { return Color.primary.opacity(0.12) }
+        if hovering { return Color.primary.opacity(0.07) }
         return .clear
     }
 }

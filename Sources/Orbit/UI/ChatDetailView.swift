@@ -7,6 +7,8 @@ import AppKit
 
 struct ChatDetailView: View {
     @EnvironmentObject var chat: ChatStore
+    @EnvironmentObject private var app: AppController
+
     let openSettings: () -> Void
 
     @State private var draft = ""
@@ -23,12 +25,12 @@ struct ChatDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Color.clear.frame(height: 44)
             if let convo = chat.selected, !convo.messages.isEmpty {
                 transcript(convo)
             } else {
                 emptyState
             }
-            Divider()
             composer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -53,7 +55,7 @@ struct ChatDetailView: View {
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 40)
+                .padding(.top, 24)
                 .padding(.bottom, 20)
             }
             .onChange(of: convo.messages.last?.content) { _, _ in
@@ -76,66 +78,77 @@ struct ChatDetailView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Spacer()
+        VStack(spacing: 10) {
             if !chat.hasLLM {
-                Image(systemName: "sparkles").font(.system(size: 38)).foregroundStyle(.secondary)
-                Text("尚未配置大模型").font(.title3.weight(.medium))
-                Text("点左下角「设置 → 模型」添加一个大模型并选为当前大模型。")
-                    .font(.callout).foregroundStyle(.secondary)
-                Button("打开设置") { openSettings() }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
+                Text("尚未配置大模型")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                Text("进入「设置 → 模型」添加一个大模型并选为当前大模型。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    app.openSettingsWorkspace(.models)
+                } label: {
+                    Label("配置模型", systemImage: "cube.box")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .padding(.top, 8)
             } else {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 38)).foregroundStyle(.secondary)
-                Text("今天想聊点什么？")
-                    .font(.title3.weight(.medium)).foregroundStyle(.secondary)
+                Text("开始一个新对话")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                Text("在下方输入问题，Orbit 会在这里生成回复。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 32)
     }
 
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("给 Orbit 发消息…", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.secondary.opacity(0.25)))
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("给 Orbit 发消息…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.secondary.opacity(0.20)))
 
-            if streamingHere {
-                Button { chat.cancel() } label: {
-                    Image(systemName: "stop.fill")
-                        .foregroundStyle(.primary)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.secondary.opacity(0.22)))
+                if streamingHere {
+                    Button { chat.cancel() } label: {
+                        Image(systemName: "stop.fill")
+                            .foregroundStyle(.primary)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Color.secondary.opacity(0.22)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("停止")
+                } else {
+                    Button { send() } label: {
+                        Image(systemName: "arrow.up")
+                            .fontWeight(.bold)
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("发送（⌘↩）")
                 }
-                .buttonStyle(.plain)
-                .help("停止")
-            } else {
-                Button { send() } label: {
-                    Image(systemName: "arrow.up")
-                        .fontWeight(.bold)
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4)))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .keyboardShortcut(.return, modifiers: .command)
-                .help("发送（⌘↩）")
             }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .background(.bar)
     }
 
     private func send() {

@@ -7,18 +7,25 @@ import Foundation
 import AppKit
 import Combine
 
+enum OrbitWorkspace {
+    case chat
+    case settings
+}
+
 @MainActor
 final class AppController: ObservableObject {
     let store: SettingsStore
+
+    /// Main-window workspace selection. Settings are shown in-window, not as a
+    /// sheet or a separate window.
+    @Published var workspace: OrbitWorkspace = .chat
+    @Published var settingsSection: SettingsSection = .providers
 
     /// True while we're listening for the next keypress to bind as the hotkey.
     @Published var capturingHotkey = false
     @Published var micPermission: PermissionState = .notDetermined
     @Published var axPermission: PermissionState = .notDetermined
     @Published var audioInputs: [String] = []
-
-    /// Drives the settings sheet presented inside the chat window.
-    @Published var settingsPresented = false
 
     /// Set by the dictation layer once it's constructed (avoids a hard
     /// compile-time dependency from the UI on the engine).
@@ -37,6 +44,16 @@ final class AppController: ObservableObject {
         micPermission = Permissions.microphone
         axPermission = Permissions.accessibility
         audioInputs = AudioDevices.inputNames()
+    }
+
+    func openChatWorkspace() {
+        workspace = .chat
+    }
+
+    func openSettingsWorkspace(_ section: SettingsSection = .providers) {
+        refreshStatus()
+        settingsSection = section
+        workspace = .settings
     }
 
     // MARK: Permissions

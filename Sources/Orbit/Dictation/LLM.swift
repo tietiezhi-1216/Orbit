@@ -24,7 +24,7 @@ enum LLM {
         guard !model.apiKey.trimmed.isEmpty else {
             throw OrbitError("所选大模型服务商缺少 API Key。")
         }
-        guard let url = model.api.chatURL(base: model.baseURL) else {
+        guard let url = model.url else {
             throw OrbitError("大模型 Base URL 无效。")
         }
         let content = render(template: template, placeholder: placeholder, transcript: transcript)
@@ -34,7 +34,7 @@ enum LLM {
         req.httpMethod = "POST"
         req.timeoutInterval = 60
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        model.api.authorize(&req, apiKey: model.apiKey)
+        model.authorize(&req)
         req.httpBody = try JSONSerialization.data(withJSONObject:
             ChatClient.payload(model: model, messages: messages, stream: false, temperature: 0.3))
 
@@ -45,16 +45,12 @@ enum LLM {
             throw OrbitError("大模型请求失败（\(code)）：\(text.prefix(300))")
         }
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        return extractText(json, protocol: model.api).trimmed
+        return extractText(json, wire: model.wire).trimmed
     }
 
-    /// Pull the assistant text out of a non-streaming response per protocol.
-    private static func extractText(_ json: [String: Any], protocol api: APIProtocol) -> String {
-        switch api {
-        case .openAIChat:
-            let choices = json["choices"] as? [[String: Any]]
-            let message = choices?.first?["message"] as? [String: Any]
-            return (message?["content"] as? String) ?? ""
+    /// Pull the assistant text out of a non-streaming response per wire format.
+    private static func extractText(_ json: [String: Any], wire: Wire) -> String {
+        switch wire {
         case .openAIResponses:
             if let direct = json["output_text"] as? String { return direct }
             // Otherwise concatenate the `output_text` blocks inside `output[]`.
@@ -63,11 +59,16 @@ enum LLM {
                 .filter { ($0["type"] as? String) == "output_text" }
                 .compactMap { $0["text"] as? String }
                 .joined()
-        case .anthropic:
+        case .anthropicMessages:
             let blocks = json["content"] as? [[String: Any]] ?? []
             return blocks.filter { ($0["type"] as? String) == "text" }
                 .compactMap { $0["text"] as? String }
                 .joined()
+        default:
+            // openAIChat + any custom chat wire.
+            let choices = json["choices"] as? [[String: Any]]
+            let message = choices?.first?["message"] as? [String: Any]
+            return (message?["content"] as? String) ?? ""
         }
     }
 }

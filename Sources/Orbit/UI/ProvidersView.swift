@@ -46,8 +46,8 @@ struct ProvidersView: View {
         } content: {
             Table(store.settings.providers, selection: $selectedID) {
                 TableColumn("名称", value: \.name)
-                TableColumn("协议") { provider in
-                    Text(provider.api.displayName).foregroundStyle(.secondary)
+                TableColumn("服务") { provider in
+                    ServiceChips(services: provider.services)
                 }
                 TableColumn("Base URL", value: \.baseURL)
                 TableColumn("API Key") { provider in
@@ -90,9 +90,44 @@ struct ProvidersView: View {
                     existing.name = updated.name
                     existing.baseURL = updated.baseURL
                     existing.apiKey = updated.apiKey
-                    existing.api = updated.api
+                    existing.auth = updated.auth
+                    existing.services = updated.services
                 }
             }
+        }
+    }
+}
+
+/// Compact capability chips for the providers table — at a glance, which
+/// interfaces a provider offers.
+private struct ServiceChips: View {
+    let services: [Service]
+
+    /// Distinct capabilities, in a stable display order.
+    private var capabilities: [Capability] {
+        var seen = Set<Capability>()
+        return services.compactMap { svc in
+            guard !seen.contains(svc.capability) else { return nil }
+            seen.insert(svc.capability)
+            return svc.capability
+        }
+    }
+
+    var body: some View {
+        if services.isEmpty {
+            Text("—").foregroundStyle(.secondary)
+        } else {
+            HStack(spacing: 5) {
+                ForEach(capabilities) { cap in
+                    Label(cap.displayName, systemImage: cap.symbol)
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+            }
+            .foregroundStyle(.secondary)
         }
     }
 }

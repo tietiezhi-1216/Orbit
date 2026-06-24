@@ -74,12 +74,8 @@ final class DictationEngine {
         pill.update(status: .recording, text: "", level: 0)
 
         guard let asr = store.settings.asrModel,
-              let resolved = store.settings.resolve(asr) else {
+              store.settings.resolve(asr) != nil else {
             fail("未选择语音识别模型，请在「模型」里添加并选择。")
-            return
-        }
-        guard resolved.transport == .http else {
-            fail("传输方式「\(resolved.transport.rawValue)」暂未在原生版本实现，请在模型里选择 HTTP。")
             return
         }
 
@@ -122,7 +118,7 @@ final class DictationEngine {
         processingTask = Task { @MainActor in
             do {
                 let wav = WAV.encode(samples, rate: rate)
-                var text = try await Transcriber.http(resolved, wav: wav)
+                var text = try await Transcriber.transcribe(resolved, wav: wav)
                 try Task.checkCancellation()
 
                 if settings.llmPolishEnabled,

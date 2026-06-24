@@ -7,15 +7,22 @@ struct SettingsSidebarView: View {
     @EnvironmentObject private var app: AppController
     @State private var searchText = ""
 
-    private var sections: [SettingsSection] {
+    /// Sections matching the current search (all when empty).
+    private var filteredSections: [SettingsSection] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return SettingsSection.allCases
         }
-
         let needle = searchText.localizedLowercase
-        return SettingsSection.allCases.filter { section in
-            section.title.localizedLowercase.contains(needle)
-        }
+        return SettingsSection.allCases.filter { $0.title.localizedLowercase.contains(needle) }
+    }
+
+    private func sections(in group: SettingsGroup) -> [SettingsSection] {
+        filteredSections.filter { $0.group == group }
+    }
+
+    /// Groups that still have at least one visible section.
+    private var visibleGroups: [SettingsGroup] {
+        SettingsGroup.allCases.filter { !sections(in: $0).isEmpty }
     }
 
     var body: some View {
@@ -60,16 +67,31 @@ struct SettingsSidebarView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 18)
 
-            ForEach(sections) { section in
-                SettingsSidebarRow(section: section,
-                                   isSelected: app.settingsSection == section) {
-                    app.settingsSection = section
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(visibleGroups) { group in
+                        Text(group.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .textCase(nil)
+                            .padding(.horizontal, 18)
+                            .padding(.top, 14)
+                            .padding(.bottom, 4)
+
+                        ForEach(sections(in: group)) { section in
+                            SettingsSidebarRow(section: section,
+                                               isSelected: app.settingsSection == section) {
+                                app.settingsSection = section
+                            }
+                        }
+                    }
                 }
+                .padding(.bottom, 12)
             }
 
             Spacer(minLength: 0)
         }
-        .frame(width: 260)
+        .frame(width: 216)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(VisualEffectView(material: .sidebar))
     }

@@ -21,18 +21,29 @@ enum ProviderAPIError: LocalizedError {
 
 enum ProviderAPI {
 
-    /// Ping the provider's models endpoint to validate base URL + API key.
+    /// Validate base URL + API key by probing the list-models endpoint. Many
+    /// providers expose `/models`; some (e.g. MiMo) don't — so a missing
+    /// endpoint is reported as "couldn't auto-verify" rather than a hard failure,
+    /// and an auth rejection nudges toward the right scheme.
     static func test(_ provider: Provider) async throws -> String {
         let (status, body) = try await getModels(provider)
-        guard status == 200 else {
+        switch status {
+        case 200:
+            return "连接正常"
+        case 404:
+            return "凭证已设置。该服务商未提供 /models 列表接口，无法自动校验——请直接在「模型」里填模型 id 并实际调用验证。"
+        case 401, 403:
+            let detail = (String(data: body, encoding: .utf8) ?? "").trimmed.prefix(160)
+            throw ProviderAPIError.transport(
+                "鉴权失败（HTTP \(status)）：请检查 API Key；若是 MiMo，请把「鉴权」切换为 api-key。\(detail)")
+        default:
             throw ProviderAPIError.http(status, String(data: body, encoding: .utf8) ?? "")
         }
-        return "连接正常"
     }
 
     /// List the model ids the provider exposes. Both the OpenAI `GET /models`
     /// and Anthropic `GET /v1/models` responses share a `{ data: [{ id }] }`
-    /// shape, so one parser covers all protocols.
+    /// shape, so one parser covers all schemes.
     static func fetchModels(_ provider: Provider) async throws -> [String] {
         let (status, body) = try await getModels(provider)
         guard status == 200 else {
@@ -50,7 +61,7 @@ enum ProviderAPI {
         guard let url = provider.modelsEndpoint else { throw ProviderAPIError.badURL }
         var req = URLRequest(url: url)
         req.timeoutInterval = 15
-        provider.api.authorize(&req, apiKey: provider.apiKey)
+        provider.auth.authorize(&req, apiKey: provider.apiKey)
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

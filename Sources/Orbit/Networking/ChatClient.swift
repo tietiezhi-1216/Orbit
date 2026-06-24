@@ -42,7 +42,7 @@ enum ChatClient {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
 
-            switch try parse(json, protocol: model.api) {
+            switch try parse(json, wire: model.wire) {
             case .delta(let piece): if !piece.isEmpty { await onDelta(piece) }
             case .done: return
             case .ignore: continue
@@ -53,24 +53,24 @@ enum ChatClient {
     // MARK: - Request building
 
     static func buildRequest(model: ResolvedModel, messages: [ChatMessage], stream: Bool) throws -> URLRequest {
-        guard let url = model.api.chatURL(base: model.baseURL) else {
+        guard let url = model.url else {
             throw OrbitError("大模型 Base URL 无效。")
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        model.api.authorize(&req, apiKey: model.apiKey)
+        model.authorize(&req)
         req.httpBody = try JSONSerialization.data(
             withJSONObject: payload(model: model, messages: messages, stream: stream, temperature: 0.7)
         )
         return req
     }
 
-    /// Build the protocol-specific request body.
+    /// Build the wire-specific request body.
     static func payload(model: ResolvedModel, messages: [ChatMessage],
                         stream: Bool, temperature: Double) -> [String: Any] {
-        switch model.api {
+        switch model.wire {
         case .openAIChat:
             return [
                 "model": model.model,
@@ -86,7 +86,7 @@ enum ChatClient {
             ]
             if stream { p["stream"] = true }
             return p
-        case .anthropic:
+        case .anthropicMessages:
             // Anthropic carries the prompt's system text as a top-level field;
             // `messages` holds only the user / assistant turns.
             let system = messages.filter { $0.role == .system }
@@ -102,6 +102,16 @@ enum ChatClient {
             if stream { p["stream"] = true }
             if !system.isEmpty { p["system"] = system }
             return p
+
+        default:
+            // Non-chat wires (embeddings / image / …) don't run through here;
+            // fall back to the Chat Completions shape for any custom chat wire.
+            return [
+                "model": model.model,
+                "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
+                "stream": stream,
+                "temperature": temperature,
+            ]
         }
     }
 
@@ -109,20 +119,13 @@ enum ChatClient {
 
     private enum Event { case delta(String), done, ignore }
 
-    private static func parse(_ json: [String: Any], protocol api: APIProtocol) throws -> Event {
+    private static func parse(_ json: [String: Any], wire: Wire) throws -> Event {
         // A top-level `error` object can arrive mid-stream on any protocol
         // (the server opened with 200 then failed). Surface it uniformly.
         if let err = json["error"] as? [String: Any] {
             throw OrbitError("大模型返回错误：\((err["message"] as? String) ?? "未知错误")")
         }
-        switch api {
-        case .openAIChat:
-            guard let choices = json["choices"] as? [[String: Any]],
-                  let delta = choices.first?["delta"] as? [String: Any],
-                  let piece = delta["content"] as? String
-            else { return .ignore }
-            return .delta(piece)
-
+        switch wire {
         case .openAIResponses:
             switch json["type"] as? String {
             case "response.output_text.delta":
@@ -136,7 +139,7 @@ enum ChatClient {
                 return .ignore
             }
 
-        case .anthropic:
+        case .anthropicMessages:
             switch json["type"] as? String {
             case "content_block_delta":
                 let delta = json["delta"] as? [String: Any]
@@ -146,6 +149,14 @@ enum ChatClient {
             default:
                 return .ignore
             }
+
+        default:
+            // openAIChat + any custom chat wire: choices[].delta.content.
+            guard let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any],
+                  let piece = delta["content"] as? String
+            else { return .ignore }
+            return .delta(piece)
         }
     }
 }

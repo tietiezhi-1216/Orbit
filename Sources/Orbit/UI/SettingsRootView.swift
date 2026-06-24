@@ -25,7 +25,6 @@ struct SettingsRootView: View {
         case .providers: ProvidersView()
         case .models:    ModelsView()
         case .dictation: DictationView()
-        case .templates: TemplatesView()
         case .about:     PermissionsView()
         }
     }

@@ -1,8 +1,11 @@
 //  AddProviderSheet.swift
-//  A modal editor for creating or editing a provider: protocol, name, Base URL,
-//  API Key. The protocol (OpenAI Chat / OpenAI Responses / Anthropic) drives the
-//  endpoint paths and auth scheme. The user can fetch the provider's model list
-//  and test the connection before saving.
+//  A modal editor for creating or editing a provider. A provider is now just
+//  credentials (name, Base URL, API Key, auth scheme) PLUS a catalog of
+//  "services" — the interfaces it offers (chat / responses / image / asr / …).
+//  Each service is a capability + wire + optional path override. Models attach
+//  to a service in the 模型 screen, so one Base URL can host many models that
+//  speak different protocols. Vendor presets seed sensible defaults; the user
+//  can fetch the model list and test the connection before saving.
 
 import SwiftUI
 
@@ -27,17 +30,21 @@ struct AddProviderSheet: View {
     init(editing: Provider? = nil, onSave: @escaping (Provider) -> Void) {
         self.editing = editing
         self.onSave = onSave
-        _draft = State(initialValue: editing ?? Provider(name: "OpenAI"))
+        // A new provider starts with one chat service so it's immediately usable;
+        // the user adds / edits / removes services freely.
+        _draft = State(initialValue: editing ?? Provider(
+            name: "", baseURL: "",
+            services: [Service(wire: .openAIChat)]
+        ))
     }
 
     private var isEditing: Bool { editing != nil }
     private var canSave: Bool { !draft.name.trimmed.isEmpty }
     private var showsResults: Bool { !models.isEmpty || modelsError != nil }
 
-    /// Live preview of where requests will actually go — lets the user see at a
-    /// glance whether they need `/v1` in the Base URL.
-    private var endpointPreview: String {
-        draft.chatEndpoint?.absoluteString ?? "（Base URL 无效）"
+    /// Live preview of the connection-test target (the list-models endpoint).
+    private var modelsPreview: String {
+        draft.modelsEndpoint?.absoluteString ?? "（Base URL 无效）"
     }
 
     var body: some View {
@@ -52,89 +59,71 @@ struct AddProviderSheet: View {
 
             Divider()
 
-            fields
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    fields
+                    Divider()
+                    servicesEditor
+                    if showsResults {
+                        Divider()
+                        resultsPanel
+                    }
+                }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
-
-            if showsResults {
-                Divider()
-                resultsPanel
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
             }
 
-            Spacer(minLength: 0)
             Divider()
             footer
         }
-        .frame(width: 540, height: showsResults ? 600 : 380)
-        .onChange(of: draft.api) { _, newValue in
-            // Switching protocol: prefill the matching default Base URL when the
-            // field is empty or still on another protocol's default, and clear
-            // results that belonged to the old endpoint.
-            let defaults = Set(APIProtocol.allCases.map(\.defaultBaseURL))
-            let current = draft.baseURL.trimmed
-            if current.isEmpty || defaults.contains(current) {
-                draft.baseURL = newValue.defaultBaseURL
-            }
-            resetProbes()
-        }
+        .frame(width: 580, height: 640)
     }
 
-    // MARK: - Fields
+    // MARK: - Credential fields
 
     private var fields: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Protocol — a pop-up select listing each provider's real API name.
-            labeledRow("协议") {
-                VStack(alignment: .leading, spacing: 5) {
-                    Picker("", selection: $draft.api) {
-                        ForEach(APIProtocol.allCases) { proto in
-                            Text(proto.displayName).tag(proto)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-                    Text(draft.api.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             labeledRow("名称") {
-                TextField("例如：OpenAI、Claude", text: $draft.name)
+                TextField("例如：OpenAI、Claude、硅基流动", text: $draft.name)
                     .textFieldStyle(.roundedBorder)
             }
 
-            // Base URL + endpoint preview
             labeledRow("Base URL") {
                 VStack(alignment: .leading, spacing: 5) {
-                    TextField(draft.api.defaultBaseURL, text: $draft.baseURL)
+                    TextField(Provider.openAIBase, text: $draft.baseURL)
                         .textFieldStyle(.roundedBorder)
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.turn.down.right")
-                        Text(endpointPreview)
+                        Text("列表/测试：\(modelsPreview)")
                             .textSelection(.enabled)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    if draft.api.expectsVersionInBase {
-                        Text("OpenAI 风格：版本段（/v1）写在 Base URL 里。")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        Text("Anthropic：Base URL 不含 /v1，应用会自动补全。")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                    Text(draft.auth == .anthropic
+                         ? "Anthropic：Base URL 不含 /v1，应用会自动补全。"
+                         : "OpenAI 风格：版本段（/v1）写在 Base URL 里。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            labeledRow("鉴权") {
+                VStack(alignment: .leading, spacing: 5) {
+                    Picker("", selection: $draft.auth) {
+                        ForEach(AuthScheme.allCases) { scheme in
+                            Text(scheme.displayName).tag(scheme)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
                 }
             }
 
             labeledRow("API Key") {
-                RevealableSecureField(title: draft.api == .anthropic ? "sk-ant-…" : "sk-…",
+                RevealableSecureField(title: draft.auth == .anthropic ? "sk-ant-…" : "sk-…",
                                       text: $draft.apiKey)
             }
         }
@@ -149,6 +138,88 @@ struct AddProviderSheet: View {
                 .foregroundStyle(.secondary)
             field()
         }
+    }
+
+    // MARK: - Services editor
+
+    private var servicesEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("支持的协议").font(.subheadline.weight(.semibold))
+                Spacer()
+                addProtocolMenu
+            }
+
+            Text("这个服务商支持哪些协议（接口规范）。模型在「模型」页选择其中之一——端点由协议决定，无需手填。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if draft.services.isEmpty {
+                Text("还没有协议，点「添加协议」。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+            } else {
+                ForEach(draft.services) { svc in
+                    protocolRow(svc)
+                }
+            }
+        }
+    }
+
+    private var addProtocolMenu: some View {
+        Menu {
+            ForEach(capabilitiesWithAvailable) { cap in
+                Section(cap.displayName) {
+                    ForEach(availableWires(for: cap)) { wire in
+                        Button(wire.displayName) {
+                            draft.services.append(Service(wire: wire))
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("添加协议", systemImage: "plus")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(capabilitiesWithAvailable.isEmpty)
+    }
+
+    private func protocolRow(_ svc: Service) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: svc.capability.symbol)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(svc.wire.displayName).font(.callout)
+                Text("\(svc.capability.displayName) · \(svc.wire.summary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                draft.services.removeAll { $0.id == svc.id }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Protocols of `capability` not yet added to this provider.
+    private func availableWires(for capability: Capability) -> [Wire] {
+        Wire.all(for: capability).filter { wire in
+            !draft.services.contains { $0.wire == wire }
+        }
+    }
+
+    /// Capabilities (functions) that still have an unused protocol to offer.
+    private var capabilitiesWithAvailable: [Capability] {
+        Capability.allCases.filter { !availableWires(for: $0).isEmpty }
     }
 
     // MARK: - Fetched models panel
@@ -230,11 +301,6 @@ struct AddProviderSheet: View {
 
     // MARK: - Actions
 
-    private func resetProbes() {
-        testStatus = ""; testOK = nil
-        models = []; modelsError = nil
-    }
-
     private func runTest() {
         testing = true
         testStatus = ""
@@ -279,3 +345,4 @@ struct AddProviderSheet: View {
         dismiss()
     }
 }
+

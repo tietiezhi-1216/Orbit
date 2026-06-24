@@ -30,15 +30,35 @@ final class SettingsStore: ObservableObject {
         lastHotkey = loaded.hotkey
     }
 
-    /// One-time cleanups for configs written by older builds. Currently: drop
-    /// providers with an empty Base URL — the signature of the removed 火山引擎
-    /// entry — and detach any models / active selections that referenced them.
+    /// One-time cleanups for configs written by older builds:
+    ///  1. Drop providers with an empty Base URL (the signature of the removed
+    ///     火山引擎 entry) and detach any models / selections that referenced them.
+    ///  2. Backfill each model's `serviceID` by matching its legacy role
+    ///     (`kind: asr | llm`) to one of its provider's services. The provider
+    ///     decoder already seeded a chat service with the correct wire (chat /
+    ///     responses / anthropic) from the legacy `api`, so an old Responses or
+    ///     Anthropic model lands on the right interface — no behaviour change.
     private static func migrate(_ s: inout Settings) {
+        // (1) Empty-base-URL cleanup.
         let before = s.providers.count
         s.providers.removeAll { $0.baseURL.trimmingCharacters(in: .whitespaces).isEmpty }
-        guard s.providers.count != before else { return }
-        let ids = Set(s.providers.map(\.id))
-        s.models.removeAll { !ids.contains($0.providerID) }
+        if s.providers.count != before {
+            let ids = Set(s.providers.map(\.id))
+            s.models.removeAll { !ids.contains($0.providerID) }
+        }
+
+        // (2) Backfill serviceID for models that predate the service catalog.
+        for i in s.models.indices where s.models[i].serviceID == nil {
+            guard let provider = s.provider(id: s.models[i].providerID) else { continue }
+            let wantCap = s.models[i].legacyKind?.capability ?? .chat
+            // Prefer a service of the matching capability; fall back to the first
+            // service so the model still resolves rather than silently breaking.
+            let match = provider.services.first { $0.capability == wantCap }
+                ?? provider.services.first
+            s.models[i].serviceID = match?.id
+        }
+
+        // Clear any active selections left dangling by the cleanup above.
         if let a = s.asrModelID, !s.models.contains(where: { $0.id == a }) { s.asrModelID = nil }
         if let l = s.llmModelID, !s.models.contains(where: { $0.id == l }) { s.llmModelID = nil }
     }

@@ -17,6 +17,50 @@ enum LLM {
         return "\(template)\n\n\(transcript)"
     }
 
+    /// Streaming polish from an already-composed `(system, user)` pair (see
+    /// `PromptComposer`). Deltas are delivered as they arrive; the full text is
+    /// returned at the end.
+    static func polishStreamMessages(_ model: ResolvedModel,
+                                     system: String,
+                                     user: String,
+                                     onDelta: @MainActor @escaping (String) -> Void) async throws -> String {
+        guard !model.apiKey.trimmed.isEmpty else {
+            throw OrbitError("所选大模型服务商缺少 API Key。")
+        }
+        var messages: [ChatMessage] = []
+        if !system.trimmed.isEmpty { messages.append(ChatMessage(role: .system, content: system)) }
+        messages.append(ChatMessage(role: .user, content: user))
+
+        var full = ""
+        try await ChatClient.stream(model: model, messages: messages) { piece in
+            full += piece
+            onDelta(piece)
+        }
+        return full.trimmed
+    }
+
+    /// Streaming polish: same prompt as `polish`, but deltas are delivered to
+    /// `onDelta` as they arrive (so the pill can render the text being written)
+    /// and the full result is returned at the end.
+    static func polishStream(_ model: ResolvedModel,
+                             template: String,
+                             placeholder: String,
+                             transcript: String,
+                             onDelta: @MainActor @escaping (String) -> Void) async throws -> String {
+        guard !model.apiKey.trimmed.isEmpty else {
+            throw OrbitError("所选大模型服务商缺少 API Key。")
+        }
+        let content = render(template: template, placeholder: placeholder, transcript: transcript)
+        let messages = [ChatMessage(role: .user, content: content)]
+
+        var full = ""
+        try await ChatClient.stream(model: model, messages: messages) { piece in
+            full += piece
+            onDelta(piece)
+        }
+        return full.trimmed
+    }
+
     static func polish(_ model: ResolvedModel,
                        template: String,
                        placeholder: String,

@@ -22,10 +22,14 @@ struct SettingsRootView: View {
     @ViewBuilder
     private var content: some View {
         switch app.settingsSection {
-        case .providers: ProvidersView()
-        case .models:    ModelsView()
-        case .dictation: DictationView()
-        case .about:     PermissionsView()
+        case .providers:        ProvidersView()
+        case .models:           ModelsView()
+        case .dictationBasic:   DictationBasicView()
+        case .dictationModes:   DictationModesView()
+        case .dictationVocab:   DictationVocabView()
+        case .dictationHistory: DictationHistoryView()
+        case .dictationStats:   DictationStatsView()
+        case .about:            PermissionsView()
         }
     }
 }

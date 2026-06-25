@@ -21,6 +21,25 @@ APP_NAME="Orbit"
 CMD="${1:-build}"
 APP_PATH=""
 
+# Sign the bundle. Prefer the stable self-signed identity (see
+# scripts/dev-signing-setup.sh) so macOS keeps Accessibility / Microphone grants
+# across rebuilds; fall back to ad-hoc if it isn't set up. TCC binds a permission
+# to the code signature, and ad-hoc re-signing changes it on every build — which
+# is why a granted app silently stops being able to paste after a rebuild.
+SIGN_IDENTITY="Orbit Self-Signed"
+sign() {
+    local target="$1"
+    if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+        codesign --force --sign "$SIGN_IDENTITY" --identifier com.orbit.app "$target" >/dev/null 2>&1 \
+            && return 0
+        echo "⚠️  signing with '$SIGN_IDENTITY' failed — falling back to ad-hoc."
+    else
+        echo "ℹ️  no stable signing identity — using ad-hoc (run scripts/dev-signing-setup.sh once"
+        echo "    so Accessibility permission survives rebuilds)."
+    fi
+    codesign --force --sign - "$target" >/dev/null 2>&1 || true
+}
+
 assemble() {
     local config="$1"
     echo "▶ swift build -c $config"
@@ -35,7 +54,7 @@ assemble() {
     cp "$bin/$APP_NAME" "$app/Contents/MacOS/$APP_NAME"
     cp "Info.plist" "$app/Contents/Info.plist"
     cp "Assets/Brand/Orbit.icns" "$app/Contents/Resources/Orbit.icns"
-    codesign --force --sign - "$app" >/dev/null 2>&1 || true
+    sign "$app"
 
     echo "✅ $app"
     APP_PATH="$app"

@@ -12,8 +12,12 @@ import Combine
 final class HotkeyMonitor {
     /// Reports the keycode captured in "learn a key" mode.
     var onCaptured: ((String) -> Void)?
-    /// Fires when the bound hotkey is pressed.
-    var onHotkey: (() -> Void)?
+    /// Fires when the bound hotkey goes DOWN (press). The gesture state machine
+    /// (hold vs double-tap) lives in the engine, so the monitor only reports the
+    /// raw key transitions.
+    var onHotkeyDown: (() -> Void)?
+    /// Fires when the bound hotkey comes UP (release).
+    var onHotkeyUp: (() -> Void)?
     /// Fires when Esc is pressed, used to dismiss/cancel the dictation overlay.
     var onEscape: (() -> Void)?
 
@@ -84,32 +88,42 @@ final class HotkeyMonitor {
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         switch type {
         case .keyDown:
-            if pressed.insert(code).inserted { onPress(code) }
+            // `insert` is false on auto-repeat (already held) — so a held key
+            // fires `down` exactly once, matching how modifiers behave.
+            if pressed.insert(code).inserted { down(code) }
         case .keyUp:
-            pressed.remove(code)
+            if pressed.remove(code) != nil { up(code) }
         case .flagsChanged:
-            // Modifiers arrive as FlagsChanged carrying their keycode; toggle.
+            // Modifiers arrive as FlagsChanged carrying their keycode; the flag
+            // set/clear maps to down/up.
             if pressed.contains(code) {
                 pressed.remove(code)
+                up(code)
             } else {
                 pressed.insert(code)
-                onPress(code)
+                down(code)
             }
         default:
             break
         }
     }
 
-    private func onPress(_ code: Int64) {
+    private func down(_ code: Int64) {
         if capturing {
             capturing = false
             DispatchQueue.main.async { [weak self] in self?.onCaptured?(String(code)) }
             return
         }
         if String(code) == hotkey {
-            DispatchQueue.main.async { [weak self] in self?.onHotkey?() }
+            DispatchQueue.main.async { [weak self] in self?.onHotkeyDown?() }
         } else if code == 53 {
             DispatchQueue.main.async { [weak self] in self?.onEscape?() }
+        }
+    }
+
+    private func up(_ code: Int64) {
+        if String(code) == hotkey {
+            DispatchQueue.main.async { [weak self] in self?.onHotkeyUp?() }
         }
     }
 }

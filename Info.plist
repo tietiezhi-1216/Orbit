@@ -29,5 +29,11 @@
 	<string>Orbit 使用语音识别把你的语音转写成文字。</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- 允许明文 HTTP 连接：服务商 Base URL 由用户自行填写，可能是内网/自建地址（如 http://frp5...）。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

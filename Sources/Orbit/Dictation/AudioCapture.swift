@@ -10,6 +10,8 @@ final class AudioCapture {
     private let targetRate: Double
     private let onFrame: ([Int16]) -> Void
     private var srcRate: Double = 48_000
+    private let lock = NSLock()
+    private var stopped = false
 
     /// - Parameters:
     ///   - targetRate: desired output sample rate (e.g. 16_000).
@@ -33,12 +35,21 @@ final class AudioCapture {
             if !frame.isEmpty { cb(frame) }
         }
         engine.prepare()
+        // `start()` may run off the main thread (so the UI doesn't stall on the
+        // first record). Guard against a `stop()` that raced ahead of us.
+        if isStopped { input.removeTap(onBus: 0); return }
         try engine.start()
+        if isStopped { engine.stop(); input.removeTap(onBus: 0) }
     }
 
     func stop() {
+        lock.lock(); stopped = true; lock.unlock()
         engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
+    }
+
+    private var isStopped: Bool {
+        lock.lock(); defer { lock.unlock() }; return stopped
     }
 
     // MARK: - DSP

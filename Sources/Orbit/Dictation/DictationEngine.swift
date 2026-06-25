@@ -1,11 +1,22 @@
 //  DictationEngine.swift
-//  The state machine that ties recording → ASR → (optional) LLM polish →
-//  (optional) auto-insert together, driving the on-screen pill. First hotkey
-//  press starts recording; the next commits (finish & recognize); ✗ cancels.
+//  Ties recording → ASR → (optional) LLM polish → (optional) auto-insert
+//  together, driving the on-screen pill, and resolves the two hotkey gestures:
 //
-//  Native version currently implements the HTTP transport (buffer the utterance,
-//  upload once). Realtime WebSocket + 火山引擎 streaming are planned next; the
-//  engine surfaces a clear message if one of those is selected.
+//   • 单击切换 (click): a quick press starts a hands-free session; click again to
+//                      finish — ASR + LLM polish.
+//   • 长按 (hold):      hold and speak, release to finish — ASR only, NO polish.
+//
+//  Which one it is comes down to the FIRST press: released before the hold
+//  threshold → it was a click (toggle session); still held past the threshold →
+//  it's push-to-talk. Gesture detection lives here (on the main actor); the
+//  HotkeyMonitor only reports raw down/up. Audio capture starts on the first
+//  key-down so neither mode clips the opening syllable.
+//
+//  Recording is serial (one mic), but processing is not: on commit the captured
+//  audio is handed to `DictationQueue` and the engine returns to idle immediately,
+//  so the next recording can start while previous utterances transcribe / polish
+//  in the background. The recording pill only covers the live mic; in-flight jobs
+//  and their results live in the result stack (see ResultStackController).
 
 import AppKit
 
@@ -29,147 +40,231 @@ private final class FrameSink {
 @MainActor
 final class DictationEngine {
     private let store: SettingsStore
+    private let queue: DictationQueue
+    /// Live recording state shown as the front card of the unified deck.
+    private let recording: RecordingState
+    /// Used only for error notices now (the recording capsule moved into the deck).
     private let pill = PillController()
     private let sink = FrameSink()
     private var capture: AudioCapture?
 
+    /// A confirmed session whose pill is on screen.
     private var active = false
-    private var finishing = false
-    private var processingTask: Task<Void, Never>?
+    /// Audio is being captured (may precede `active` during gesture disambiguation).
+    private var capturing = false
+    /// Whether the in-flight session should run the LLM polish step. Set by the
+    /// gesture: hold → false (push-to-talk), click → true.
+    private var polishThisSession = false
+    /// The focused app when recording began — fed into the polish prompt so the
+    /// model can match tone (email vs chat vs IDE). Captured before Orbit could
+    /// come forward.
+    private var frontApp: String?
 
     private let httpRate = 16_000
 
-    init(store: SettingsStore) {
+    // MARK: Gesture state machine
+
+    private enum Gesture {
+        case idle          // nothing happening
+        case deciding      // key down; waiting to see click vs hold
+        case tapRecording  // click-to-start toggle session, recording (polish)
+        case holdRecording // push-to-talk, key held, recording (no polish)
+    }
+    private var gesture: Gesture = .idle
+    private var holdTask: Task<Void, Never>?
+    /// Still held past this → push-to-talk (no polish). Released sooner → it was a
+    /// click, which starts a click-to-stop toggle session (with polish).
+    private let holdThreshold: UInt64 = 250_000_000   // 0.25s
+
+    init(store: SettingsStore, queue: DictationQueue, recording: RecordingState) {
         self.store = store
-        pill.onCancel = { [weak self] in self?.cancel() }
-        pill.onCommit = { [weak self] in self?.commit() }
+        self.queue = queue
+        self.recording = recording
+        recording.onCancel = { [weak self] in self?.cancel() }
+        recording.onCommit = { [weak self] in self?.commit() }
         pill.onNoticeAction = { [weak self] in self?.cancel() }
     }
 
-    // MARK: - Entry points
+    // MARK: - Hotkey gesture entry points
 
-    func toggle() {
-        if finishing {
-            showProcessingNotice()
-            return
+    /// Bound hotkey pressed down. A new recording can begin even while previous
+    /// utterances are still processing — those run in the background queue.
+    func hotkeyDown() {
+        switch gesture {
+        case .idle:
+            // Show the capsule and start capturing the INSTANT the key goes down —
+            // don't wait to classify the gesture, or there's a perceptible press
+            // latency. Click-vs-hold only decides polish, which isn't needed until
+            // commit, so resolve it lazily (assume "click" until proven a hold).
+            guard confirmRecording() else { return }
+            beginCapture()
+            polishThisSession = true
+            gesture = .deciding
+            holdTask?.cancel()
+            let threshold = holdThreshold
+            holdTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: threshold)
+                guard let self, !Task.isCancelled, self.gesture == .deciding else { return }
+                // Still held past the threshold → push-to-talk: no polish.
+                self.gesture = .holdRecording
+                self.polishThisSession = false
+            }
+
+        case .tapRecording:
+            // A second click ends the toggle session.
+            commit()
+
+        case .deciding, .holdRecording:
+            break
         }
-        if active { commit() } else { start() }
+    }
+
+    /// Bound hotkey released.
+    func hotkeyUp() {
+        switch gesture {
+        case .holdRecording:
+            // Push-to-talk release → finish (no polish).
+            commit()
+
+        case .deciding:
+            // Released before the threshold → it was a click: a hands-free toggle
+            // that records until the next click (with polish). Capsule already up.
+            holdTask?.cancel(); holdTask = nil
+            gesture = .tapRecording
+            polishThisSession = true
+
+        case .idle, .tapRecording:
+            break
+        }
     }
 
     func handleEscape() {
-        if active || pill.isNoticeVisible {
+        if active || capturing {
             cancel()
+        } else if pill.isNoticeVisible {
+            pill.hideNotice()
+        } else {
+            // Not recording → Esc cancels the in-flight conversion (front card).
+            queue.cancelNewest()
         }
     }
 
-    func start() {
-        guard !active else { return }
-        active = true
-        finishing = false
-        processingTask?.cancel()
-        processingTask = nil
-        sink.reset()
-        pill.hideNotice()
-        pill.show()
-        pill.update(status: .recording, text: "", level: 0)
+    /// Menu-bar "开始 / 停止听写": behaves as the click-to-stop toggle session
+    /// (polish on, since that's the richer mode).
+    func toggleFromMenu() {
+        if active {
+            commit()
+        } else {
+            cancelGestureTimers()
+            guard confirmRecording() else { return }
+            beginCapture()
+            polishThisSession = true
+            gesture = .tapRecording
+        }
+    }
 
+    // MARK: - Recording lifecycle
+
+    /// Validate + show the recording capsule immediately. Returns false (after
+    /// surfacing an error) if no ASR model is configured.
+    @discardableResult
+    private func confirmRecording() -> Bool {
         guard let asr = store.settings.asrModel,
               store.settings.resolve(asr) != nil else {
             fail("未选择语音识别模型，请在「模型」里添加并选择。")
-            return
+            return false
         }
+        // Capture the focused app now, while the user's target is still frontmost.
+        frontApp = NSWorkspace.shared.frontmostApplication?.localizedName
+        active = true
+        pill.hideNotice()
+        recording.level.value = 0
+        recording.active = true
+        return true
+    }
+
+    /// Start the microphone. The engine is started OFF the main thread so the
+    /// capsule (already shown by `confirmRecording`) doesn't wait on audio setup —
+    /// that first-start can cost 100ms+ and would otherwise read as press latency.
+    private func beginCapture() {
+        guard !capturing else { return }
+        capturing = true
+        sink.reset()
 
         let sink = self.sink
         let capture = AudioCapture(targetRate: httpRate) { [weak self] frame in
             sink.append(frame)
             let level = AudioCapture.level(frame)
             Task { @MainActor in
-                guard let self, self.active, !self.finishing else { return }
-                self.pill.update(status: .recording, text: "", level: level)
+                guard let self, self.active else { return }
+                self.recording.level.value = level
             }
         }
-        do {
-            try capture.start()
-            self.capture = capture
-        } catch {
-            fail("无法开始录音：\(error.localizedDescription)")
+        self.capture = capture
+        Task.detached {
+            do {
+                try capture.start()
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.fail("无法开始录音：\(error.localizedDescription)")
+                }
+            }
         }
     }
 
     func commit() {
-        guard active, !finishing else { return }
-        finishing = true
+        guard active else { return }
+        let polish = polishThisSession
+        let app = frontApp
+        gesture = .idle
+        cancelGestureTimers()
         capture?.stop()
         capture = nil
+        capturing = false
+        active = false
 
         guard let asr = store.settings.asrModel,
-              let resolved = store.settings.resolve(asr) else {
+              store.settings.resolve(asr) != nil else {
+            sink.reset()
             fail("识别模型缺失。")
             return
         }
 
+        // Hand the audio to the background queue and free the engine at once: the
+        // user can start the next recording immediately. The just-recorded capsule
+        // becomes a conversion card in the same deck.
         let samples = sink.drain()
-        if samples.isEmpty { finishIdle(); return }
-
-        pill.hide()
-        let settings = store.settings
-        let rate = httpRate
-
-        processingTask = Task { @MainActor in
-            do {
-                let wav = WAV.encode(samples, rate: rate)
-                var text = try await Transcriber.transcribe(resolved, wav: wav)
-                try Task.checkCancellation()
-
-                if settings.llmPolishEnabled,
-                   let llm = settings.llmModel,
-                   let resolvedLLM = settings.resolve(llm) {
-                    let template = settings.activeTemplate?.template
-                        ?? "{{\(settings.insertPosition)}}"
-                    if let polished = try? await LLM.polish(
-                        resolvedLLM,
-                        template: template,
-                        placeholder: settings.insertPosition,
-                        transcript: text
-                    ), !polished.isEmpty {
-                        text = polished
-                    }
-                    try Task.checkCancellation()
-                }
-
-                if settings.autoInsert, !text.isEmpty {
-                    try Task.checkCancellation()
-                    TextInserter.insert(text)
-                }
-                finishIdle()
-            } catch is CancellationError {
-                finishIdle()
-            } catch {
-                fail("识别失败：\(error.localizedDescription)")
-            }
-        }
+        recording.active = false
+        guard !samples.isEmpty else { return }
+        queue.submit(samples: samples, rate: httpRate, polish: polish, frontApp: app)
     }
 
+    /// Cancel the *current recording* only — in-flight queue jobs keep going.
     func cancel() {
+        cancelGestureTimers()
+        gesture = .idle
         capture?.stop()
         capture = nil
-        processingTask?.cancel()
-        processingTask = nil
+        capturing = false
         sink.reset()
         finishIdle()
     }
 
     // MARK: - Helpers
 
+    private func cancelGestureTimers() {
+        holdTask?.cancel(); holdTask = nil
+    }
+
     private func fail(_ message: String) {
         NSLog("[dictation] \(message)")
+        cancelGestureTimers()
+        gesture = .idle
         capture?.stop()
         capture = nil
-        processingTask?.cancel()
-        processingTask = nil
+        capturing = false
         active = false
-        finishing = false
-        pill.hide()
+        recording.active = false
 
         let notice = noticeParts(from: message)
         pill.showNotice(
@@ -177,14 +272,6 @@ final class DictationEngine {
             message: notice.message,
             actionTitle: "关闭",
             autoDismissAfter: 4
-        )
-    }
-
-    private func showProcessingNotice() {
-        pill.showNotice(
-            title: "Orbit仍在处理您的上一个转录",
-            message: "如果您想取消上一个转录，请按 Esc 或点击下面。",
-            actionTitle: "取消"
         )
     }
 
@@ -203,9 +290,9 @@ final class DictationEngine {
 
     private func finishIdle() {
         active = false
-        finishing = false
-        processingTask = nil
-        pill.hide()
+        capturing = false
+        gesture = .idle
+        recording.active = false
         pill.hideNotice()
     }
 }

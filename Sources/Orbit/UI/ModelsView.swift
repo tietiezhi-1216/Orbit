@@ -15,6 +15,7 @@ struct ModelsView: View {
 
     @State private var selectedID: ModelConfig.ID?
     @State private var showingAdd = false
+    @State private var showingBatch = false
     @State private var editingModel: ModelConfig?
 
     /// Providers that expose at least one service (so a model can attach).
@@ -46,6 +47,11 @@ struct ModelsView: View {
                     Label("删除", systemImage: "trash")
                 }
                 .disabled(selectedID == nil)
+
+                Button { showingBatch = true } label: {
+                    Label("批量添加", systemImage: "square.stack.3d.up")
+                }
+                .disabled(store.settings.providers.allSatisfy { $0.baseURL.trimmed.isEmpty })
 
                 Button { showingAdd = true } label: {
                     Label("添加模型", systemImage: "plus")
@@ -102,6 +108,9 @@ struct ModelsView: View {
         }
         .sheet(isPresented: $showingAdd) {
             ModelEditorSheet(providers: usableProviders) { store.addModel($0) }
+        }
+        .sheet(isPresented: $showingBatch) {
+            BatchAddModelsSheet()
         }
         .sheet(item: $editingModel) { model in
             ModelEditorSheet(editing: model, providers: usableProviders) { updated in

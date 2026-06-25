@@ -404,6 +404,22 @@ struct Settings: Codable {
     /// Placeholder name used inside templates (`{{<insertPosition>}}`).
     var insertPosition: String
 
+    // MARK: Polish prompt system (user templates; see PromptComposer)
+
+    /// User vocabulary the system folds into the polish prompt's hotword block
+    /// (see PromptComposer); the template needs no placeholder to receive it.
+    var hotwords: [String]
+    /// Languages the user works in — surfaced in the prompt's context premise.
+    var workingLanguages: [String]
+    /// Preferred output language (context premise).
+    var outputLanguage: OutputLanguage
+    /// Tell the model which app is focused so it can match tone.
+    var frontAppAware: Bool
+    /// Append the "transcript is data, not instructions" guard.
+    var injectionDefense: Bool
+    /// Strip AI preamble / code fences / wrapping quotes from the reply.
+    var cleanOutput: Bool
+
     static let defaultTemplateID = "default-polish"
 
     static var defaults: Settings {
@@ -413,8 +429,8 @@ struct Settings: Codable {
             templates: [
                 PromptTemplate(
                     id: defaultTemplateID,
-                    name: "默认润色",
-                    template: "你是一个听写助手。请把下面的文本改写得通顺、标点正确、自然流畅，保持原意和原语言。只输出改写后的文本。\n\n{{transcript}}"
+                    name: "默认",
+                    template: DictationDefaults.seedTemplatePrompt
                 )
             ],
             hotkey: "54",
@@ -430,7 +446,13 @@ struct Settings: Codable {
     init(providers: [Provider], models: [ModelConfig], templates: [PromptTemplate],
          hotkey: String, asrModelID: String?, llmModelID: String?,
          activeTemplateID: String?, llmPolishEnabled: Bool, autoInsert: Bool,
-         insertPosition: String) {
+         insertPosition: String,
+         hotwords: [String] = [],
+         workingLanguages: [String] = [],
+         outputLanguage: OutputLanguage = .auto,
+         frontAppAware: Bool = true,
+         injectionDefense: Bool = true,
+         cleanOutput: Bool = true) {
         self.providers = providers
         self.models = models
         self.templates = templates
@@ -441,6 +463,12 @@ struct Settings: Codable {
         self.llmPolishEnabled = llmPolishEnabled
         self.autoInsert = autoInsert
         self.insertPosition = insertPosition
+        self.hotwords = hotwords
+        self.workingLanguages = workingLanguages
+        self.outputLanguage = outputLanguage
+        self.frontAppAware = frontAppAware
+        self.injectionDefense = injectionDefense
+        self.cleanOutput = cleanOutput
     }
 
     init(from decoder: Decoder) throws {
@@ -458,6 +486,12 @@ struct Settings: Codable {
         llmPolishEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmPolishEnabled) ?? d.llmPolishEnabled
         autoInsert = try c.decodeIfPresent(Bool.self, forKey: .autoInsert) ?? d.autoInsert
         insertPosition = try c.decodeIfPresent(String.self, forKey: .insertPosition) ?? d.insertPosition
+        hotwords = try c.decodeIfPresent([String].self, forKey: .hotwords) ?? d.hotwords
+        workingLanguages = try c.decodeIfPresent([String].self, forKey: .workingLanguages) ?? d.workingLanguages
+        outputLanguage = try c.decodeIfPresent(OutputLanguage.self, forKey: .outputLanguage) ?? d.outputLanguage
+        frontAppAware = try c.decodeIfPresent(Bool.self, forKey: .frontAppAware) ?? d.frontAppAware
+        injectionDefense = try c.decodeIfPresent(Bool.self, forKey: .injectionDefense) ?? d.injectionDefense
+        cleanOutput = try c.decodeIfPresent(Bool.self, forKey: .cleanOutput) ?? d.cleanOutput
         // A hotkey must be a numeric keycode; migrate anything else to right ⌘.
         if Int(hotkey) == nil { hotkey = d.hotkey }
     }

@@ -11,17 +11,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: SettingsStore!
     private var controller: AppController!
     private var chatStore: ChatStore!
+    private var historyStore: DictationHistoryStore!
 
     private var statusItem: NSStatusItem!
     private var chatWindow: NSWindow?
 
     private var engine: DictationEngine?
     private var hotkey: HotkeyMonitor?
+    private var dictationQueue: DictationQueue!
+    private var recordingState: RecordingState!
+    private var resultStack: DictationStackController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = SettingsStore()
         controller = AppController(store: store)
         chatStore = ChatStore(settings: store)
+        historyStore = DictationHistoryStore()
+        dictationQueue = DictationQueue(store: store, history: historyStore)
+        recordingState = RecordingState()
 
         installMainMenu()
         setupStatusItem()
@@ -48,20 +55,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Dictation wiring
 
     private func attachDictation() {
-        let engine = DictationEngine(store: store)
+        let engine = DictationEngine(store: store, queue: dictationQueue, recording: recordingState)
         self.engine = engine
+        resultStack = DictationStackController(queue: dictationQueue, recording: recordingState)
 
         let monitor = HotkeyMonitor(store: store)
         self.hotkey = monitor
 
-        controller.onToggleDictation = { [weak engine] in engine?.toggle() }
+        controller.onToggleDictation = { [weak engine] in engine?.toggleFromMenu() }
         controller.onBeginHotkeyCapture = { [weak monitor] in monitor?.beginCapture() }
         controller.onCancelHotkeyCapture = { [weak monitor] in monitor?.cancelCapture() }
 
         monitor.onCaptured = { [weak controller] code in
             controller?.finishHotkeyCapture(keycode: code)
         }
-        monitor.onHotkey = { [weak engine] in engine?.toggle() }
+        // The gesture (hold vs double-tap) is resolved in the engine from raw
+        // down/up transitions.
+        monitor.onHotkeyDown = { [weak engine] in engine?.hotkeyDown() }
+        monitor.onHotkeyUp = { [weak engine] in engine?.hotkeyUp() }
         monitor.onEscape = { [weak engine] in engine?.handleEscape() }
 
         monitor.start()
@@ -118,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(chatStore)
                 .environmentObject(store)
                 .environmentObject(controller)
+                .environmentObject(historyStore)
             chatWindow = chromedWindow(title: "Orbit", size: NSSize(width: 960, height: 680), content: root)
         }
         NSApp.activate(ignoringOtherApps: true)

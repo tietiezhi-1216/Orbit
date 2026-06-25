@@ -1,24 +1,24 @@
 //  SettingsSection.swift
 //  Stable identifiers for Orbit's in-window settings workspace, grouped into a
-//  two-level sidebar: top-level groups (模型服务 / 功能 / 系统) each containing
-//  their sections. "功能" holds whole features (听写 today; screenshot
-//  annotation and others later), so adding a feature is just a new case here.
+//  two-level sidebar: top-level groups (模型服务 / 听写 / 系统) each containing their
+//  sections. The 听写 feature is split into its own group with sub-pages
+//  (基础 / 模板 / 词汇 / 历史 / 统计) so each concern gets a focused screen.
 
 import Foundation
 
 /// A top-level sidebar group (parent menu).
 enum SettingsGroup: Int, CaseIterable, Identifiable {
-    case access    // 服务商 + 模型 — where models come from
-    case feature   // 完整功能：听写、（后续）截图标注 …
-    case system    // 权限 & 关于
+    case access     // 服务商 + 模型 — where models come from
+    case dictation  // 听写功能的各个子页
+    case system     // 权限 & 关于
 
     var id: Int { rawValue }
 
     var title: String {
         switch self {
-        case .access:  return "模型服务"
-        case .feature: return "功能"
-        case .system:  return "系统"
+        case .access:    return "模型服务"
+        case .dictation: return "听写"
+        case .system:    return "系统"
         }
     }
 }
@@ -26,7 +26,11 @@ enum SettingsGroup: Int, CaseIterable, Identifiable {
 enum SettingsSection: String, CaseIterable, Identifiable {
     case providers
     case models
-    case dictation
+    case dictationBasic
+    case dictationModes
+    case dictationVocab
+    case dictationHistory
+    case dictationStats
     case about
 
     var id: Self { self }
@@ -34,27 +38,38 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     /// The parent group this section lives under.
     var group: SettingsGroup {
         switch self {
-        case .providers, .models: return .access
-        case .dictation:          return .feature
-        case .about:              return .system
+        case .providers, .models:
+            return .access
+        case .dictationBasic, .dictationModes, .dictationVocab, .dictationHistory, .dictationStats:
+            return .dictation
+        case .about:
+            return .system
         }
     }
 
     var title: String {
         switch self {
-        case .providers: return "服务商"
-        case .models: return "模型"
-        case .dictation: return "听写"
-        case .about: return "权限 & 关于"
+        case .providers:        return "服务商"
+        case .models:           return "模型"
+        case .dictationBasic:   return "基础"
+        case .dictationModes:   return "模板"
+        case .dictationVocab:   return "词汇"
+        case .dictationHistory: return "历史"
+        case .dictationStats:   return "统计"
+        case .about:            return "权限 & 关于"
         }
     }
 
     var symbol: String {
         switch self {
-        case .providers: return "server.rack"
-        case .models: return "cube.box"
-        case .dictation: return "mic"
-        case .about: return "lock.shield"
+        case .providers:        return "server.rack"
+        case .models:           return "cube.box"
+        case .dictationBasic:   return "mic"
+        case .dictationModes:   return "slider.horizontal.3"
+        case .dictationVocab:   return "character.book.closed"
+        case .dictationHistory: return "clock.arrow.circlepath"
+        case .dictationStats:   return "chart.bar"
+        case .about:            return "lock.shield"
         }
     }
 

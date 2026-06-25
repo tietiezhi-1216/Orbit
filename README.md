@@ -62,7 +62,7 @@ Grab the latest build from [**Releases**](https://github.com/tietiezhi-1216/Orbi
 
 - **Apple Silicon only** (arm64) · **macOS 14+** — Intel Macs are not supported.
 - The build is **ad-hoc signed** (not notarized yet), so on first launch macOS blocks it: **right-click `Orbit.app` → Open**, then confirm. One time only.
-- Unzip, move `Orbit.app` to `/Applications`, and grant **Microphone** + **Accessibility** when prompted (see [Permissions](#permissions)).
+- Open the `.dmg` and drag **Orbit** into **Applications**, then grant **Microphone** + **Accessibility** when prompted (see [Permissions](#permissions)).
 
 Prefer building from source? See [Getting started](#-getting-started).
 

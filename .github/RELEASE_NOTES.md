@@ -2,7 +2,7 @@
 
 开放的多模态 AI 平台——每个模型都是一颗卫星。首个预览版落地两个界面：**聊天（Chat）** 与 **全局语音听写（Dictation）**。
 
-> ⚠️ 预览版，ad-hoc 签名、未公证。首次打开请 **右键 → 打开** 绕过 Gatekeeper。当前仅在 Apple Silicon · macOS 14+ 上验证。
+> ⚠️ 预览版，ad-hoc 签名、未公证。打开 `.dmg` → 把 Orbit 拖进「应用程序」→ 首次启动 **右键 → 打开** 绕过 Gatekeeper。当前仅 Apple Silicon · macOS 14+。
 
 ## ✨ 主要功能
 

@@ -1,0 +1,63 @@
+name: Release
+
+# 仅在推送 v* tag（或手动 workflow_dispatch 指定版本）时触发：构建 release、
+# 把 Orbit.app 打成 zip、创建 GitHub Release 并上传产物 + SHA256。
+# 不打 tag 就不会发布——首版先用 CI 跑通，确认产物后再打 tag。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 0.0.1）'
+        required: true
+
+permissions:
+  contents: write          # 创建 Release / 上传产物需要写权限
+
+jobs:
+  release:
+    name: Build & publish (macOS · ad-hoc)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V"   >> "$GITHUB_OUTPUT"
+
+      - name: Build release bundle
+        run: ./build.sh release
+
+      - name: Package .app → zip
+        id: pkg
+        run: |
+          BIN="$(swift build -c release --show-bin-path)"
+          APP="$BIN/Orbit.app"
+          ARCH="$(uname -m)"
+          ZIP="Orbit-${{ steps.ver.outputs.version }}-macos-${ARCH}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+          shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Orbit ${{ steps.ver.outputs.version }}
+          body_path: .github/RELEASE_NOTES.md
+          prerelease: true
+          files: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.zip }}.sha256

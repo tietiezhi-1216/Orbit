@@ -58,6 +58,7 @@ final class RecordingLevel: ObservableObject {
 @MainActor
 final class DictationJob: ObservableObject, Identifiable {
     let id = UUID()
+    let date = Date()
     let seq: Int
     let polish: Bool
     let frontApp: String?
@@ -79,9 +80,12 @@ final class DictationJob: ObservableObject, Identifiable {
     var transcript: String = ""
     var polishedOut: String?
     var modeTag: String?
+    /// Per-stage retained files: audio immediately, transcript after ASR, polish after LLM.
+    var artifacts: DictationArtifactPaths?
     /// User cancelled this job mid-flight; its result is dropped (but the delivery
     /// cursor still advances past it so later jobs aren't stalled).
     var cancelled = false
+    var historyRecorded = false
     /// Guards `markReady` so a job is only ever released to delivery once.
     var readied = false
 
@@ -126,6 +130,15 @@ final class DictationQueue: ObservableObject {
     func submit(samples: [Int16], rate: Int, polish: Bool, frontApp: String?) {
         let job = DictationJob(seq: nextSeq, polish: polish, frontApp: frontApp,
                                samples: samples, rate: rate)
+        job.artifacts = DictationAudioArchive.createSession(
+            id: job.id.uuidString,
+            date: job.date,
+            samples: samples,
+            rate: rate,
+            seq: nextSeq,
+            frontApp: frontApp,
+            polish: polish
+        )
         nextSeq += 1
         cards.append(job)
         pending.append(job)
@@ -150,14 +163,30 @@ final class DictationQueue: ObservableObject {
     private func process(_ job: DictationJob) async {
         guard let asr = store.settings.asrModel,
               let resolved = store.settings.resolve(asr) else {
-            job.failure = "识别模型缺失"; job.phase = .failed; markReady(job); return
+            job.failure = withAudioRecovery("识别模型缺失", job.artifacts)
+            DictationAudioArchive.saveFailure(job.failure ?? "识别模型缺失", paths: job.artifacts)
+            record(job, inserted: false, failure: job.failure)
+            job.phase = .failed; markReady(job); return
         }
         do {
-            let wav = WAV.encode(job.samples, rate: job.rate)
-            let transcript = try await Transcriber.transcribe(resolved, wav: wav).trimmed
+            let transcript = try await Transcriber.transcribe(
+                resolved,
+                samples: job.samples,
+                rate: job.rate
+            ) { index, total in
+                await MainActor.run {
+                    if total > 1 {
+                        job.statusLabel = "识别中 \(index)/\(total)"
+                    }
+                }
+            }.trimmed
             job.transcript = transcript
+            DictationAudioArchive.saveTranscript(transcript, paths: job.artifacts)
             guard !transcript.isEmpty else {
-                job.failure = "没有识别到内容"; job.phase = .failed; markReady(job); return
+                job.failure = withAudioRecovery("没有识别到内容", job.artifacts)
+                DictationAudioArchive.saveFailure(job.failure ?? "没有识别到内容", paths: job.artifacts)
+                record(job, inserted: false, failure: job.failure)
+                job.phase = .failed; markReady(job); return
             }
 
             // Polish only when the gesture asked for it AND a chat model exists.
@@ -182,6 +211,7 @@ final class DictationQueue: ObservableObject {
                     if !cleaned.isEmpty {
                         polished = cleaned
                         job.streamText = cleaned
+                        DictationAudioArchive.savePolished(cleaned, paths: job.artifacts)
                     }
                 } catch {
                     // Polish is best-effort: fall back to the raw transcript.
@@ -196,7 +226,9 @@ final class DictationQueue: ObservableObject {
             job.phase = .done
             markReady(job)
         } catch {
-            job.failure = "识别失败：\(error.localizedDescription)"
+            job.failure = withAudioRecovery("识别失败：\(error.localizedDescription)", job.artifacts)
+            DictationAudioArchive.saveFailure(job.failure ?? error.localizedDescription, paths: job.artifacts)
+            record(job, inserted: false, failure: job.failure)
             job.phase = .failed
             markReady(job)
         }
@@ -253,12 +285,21 @@ final class DictationQueue: ObservableObject {
     }
 
     private func record(_ job: DictationJob, inserted: Bool) {
+        record(job, inserted: inserted, failure: nil)
+    }
+
+    private func record(_ job: DictationJob, inserted: Bool, failure: String?) {
+        guard !job.historyRecorded else { return }
+        job.historyRecorded = true
         history.add(DictationEntry(
-            date: Date(),
+            id: job.id.uuidString,
+            date: job.date,
             transcript: job.transcript,
             polished: job.polishedOut,
             inserted: inserted,
-            mode: job.modeTag
+            mode: job.modeTag,
+            failure: failure,
+            artifacts: job.artifacts
         ))
     }
 
@@ -290,6 +331,9 @@ final class DictationQueue: ObservableObject {
     func cancelJob(_ job: DictationJob) {
         job.cancelled = true
         tasks[job.id]?.cancel()
+        job.failure = withAudioRecovery("已取消", job.artifacts)
+        DictationAudioArchive.saveFailure(job.failure ?? "已取消", paths: job.artifacts)
+        record(job, inserted: false, failure: job.failure)
         cards.removeAll { $0.id == job.id }
         markReady(job)
     }
@@ -312,5 +356,10 @@ final class DictationQueue: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             cards.removeAll { $0.id == job.id }
         }
+    }
+
+    private func withAudioRecovery(_ message: String, _ artifacts: DictationArtifactPaths?) -> String {
+        guard let path = artifacts?.audioPath else { return message }
+        return "\(message)；录音已保存：\(path)"
     }
 }

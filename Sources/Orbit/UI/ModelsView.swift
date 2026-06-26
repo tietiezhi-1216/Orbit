@@ -68,6 +68,13 @@ struct ModelsView: View {
                 TableColumn("协议") { model in
                     Text(protocolName(model)).foregroundStyle(.secondary)
                 }
+                TableColumn("LLM 能力") { model in
+                    if store.settings.capability(of: model) == .chat {
+                        LLMCapabilityBadges(capabilities: model.llmCapabilities, compact: true)
+                    } else {
+                        Text("—").foregroundStyle(.tertiary)
+                    }
+                }
                 TableColumn("模型") { model in
                     Text(model.model.isEmpty ? "—" : model.model)
                         .font(.callout.monospaced())
@@ -120,6 +127,8 @@ struct ModelsView: View {
                     existing.name = updated.name
                     existing.model = updated.model
                     existing.language = updated.language
+                    existing.params = updated.params
+                    existing.llmCapabilities = updated.llmCapabilities
                 }
             }
         }
@@ -172,7 +181,14 @@ struct ModelEditorSheet: View {
     private var services: [Service] { provider?.services ?? [] }
     private var selectedService: Service? { services.first { $0.id == draft.serviceID } }
     private var isASR: Bool { selectedService?.capability == .asr }
+    private var isChat: Bool { selectedService?.capability == .chat }
     private var isEditing: Bool { editing != nil }
+
+    private var sheetHeight: CGFloat {
+        if isChat { return 500 }
+        if isASR { return 430 }
+        return 380
+    }
 
     private var endpointPreview: String {
         guard let provider, let svc = selectedService else { return "（选择协议后显示）" }
@@ -223,6 +239,7 @@ struct ModelEditorSheet: View {
                             }
                         }
                         .labelsHidden()
+                        .onChange(of: draft.serviceID) { _, _ in syncServiceState() }
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.turn.down.right")
                             Text(endpointPreview).textSelection(.enabled)
@@ -260,6 +277,23 @@ struct ModelEditorSheet: View {
                             .textFieldStyle(.roundedBorder)
                     }
                 }
+
+                if isChat {
+                    labeledRow("能力") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("支持多模态（图像 / 文件等输入）",
+                                   isOn: capabilityBinding(\.multimodal))
+                            Toggle("支持思考能力（Reasoning / Thinking）",
+                                   isOn: capabilityBinding(\.thinking))
+                            Toggle("支持调用工具（Tool Calling / Function Calling）",
+                                   isOn: capabilityBinding(\.toolCalling))
+                            LLMCapabilityBadges(capabilities: draft.llmCapabilities)
+                            Text("请按该模型真实能力标记；首页对话框和模型列表会明确展示这些能力。")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 20).padding(.vertical, 18)
 
@@ -276,7 +310,7 @@ struct ModelEditorSheet: View {
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .frame(width: 520, height: isASR ? 430 : 380)
+        .frame(width: 540, height: sheetHeight)
         .onAppear { syncService() }
     }
 
@@ -295,8 +329,20 @@ struct ModelEditorSheet: View {
     private func syncService() {
         if let id = draft.serviceID, services.contains(where: { $0.id == id }) { return }
         draft.serviceID = services.first?.id
-        // Clear ASR-only state when the new service isn't ASR.
+        syncServiceState()
+    }
+
+    private func syncServiceState() {
+        // Clear capability-specific state when the selected protocol changes.
         if !isASR { draft.language = nil }
+        if !isChat { draft.llmCapabilities = .none }
+    }
+
+    private func capabilityBinding(_ keyPath: WritableKeyPath<LLMCapabilities, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { draft.llmCapabilities[keyPath: keyPath] },
+            set: { draft.llmCapabilities[keyPath: keyPath] = $0 }
+        )
     }
 
     private func loadModels() {
@@ -313,6 +359,8 @@ struct ModelEditorSheet: View {
         var model = draft
         model.name = model.name.trimmed
         model.model = model.model.trimmed
+        if !isASR { model.language = nil }
+        if !isChat { model.llmCapabilities = .none }
         onSave(model)
         dismiss()
     }

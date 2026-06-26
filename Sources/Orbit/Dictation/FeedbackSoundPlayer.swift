@@ -2,10 +2,10 @@
 //  Plays a `SoundCue` — used both for live dictation cues (driven by
 //  `DictationEngine`) and for previewing/debugging in the settings editor.
 //
-//  Three paths: macOS named alert sounds go through `NSSound`; imported files and
-//  synthesized tones go through `AVAudioPlayer`. Tones are rendered on the fly to
-//  an in-memory 16-bit PCM WAV — no temp files, no audio-graph setup — which is
-//  both reliable and cheap for the few-thousand-sample clips these cues are.
+//  macOS system sounds go through `NSSound`; imported files and synthesized tones
+//  go through `AVAudioPlayer`. Multi-track cues schedule multiple sources with
+//  per-track delay and gain, which gives custom cues room for layered attacks,
+//  short tails, and richer feedback without introducing a full audio graph.
 //
 //  Players are retained while they sound (so they aren't deallocated mid-play)
 //  and finished ones are pruned on the next play; cues are short, so this stays a
@@ -21,34 +21,120 @@ final class FeedbackSoundPlayer {
 
     /// Play a cue. `masterVolume` is folded in on top of the cue's own volume.
     func play(_ cue: SoundCue, masterVolume: Double = 1) {
-        // Drop anything that finished since last time.
-        players.removeAll { !$0.isPlaying }
-        sounds.removeAll { !$0.isPlaying }
+        pruneFinishedPlayers()
 
-        let volume = Float(max(0, min(1, cue.volume * masterVolume)))
+        let baseVolume = Float(max(0, min(1, cue.volume * masterVolume)))
+        guard baseVolume > 0.001 else { return }
 
         switch cue.source {
         case .silent:
             return
+        case .mix(let mix):
+            for track in mix.tracks {
+                let volume = baseVolume * Float(max(0, min(1, track.volume)))
+                guard volume > 0.001 else { continue }
+                schedule(offset: track.offset) { [self] in
+                    play(track.source, volume: volume)
+                }
+            }
+        case .systemDefault, .system, .tone, .file:
+            play(cue.source, volume: baseVolume)
+        }
+    }
 
+    private func pruneFinishedPlayers() {
+        players.removeAll { !$0.isPlaying }
+        sounds.removeAll { !$0.isPlaying }
+    }
+
+    private func schedule(offset: Double, _ action: @escaping @MainActor () -> Void) {
+        let delay = max(0, min(5, offset))
+        guard delay > 0 else {
+            action()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Task { @MainActor in action() }
+        }
+    }
+
+    private func play(_ source: SoundSource, volume: Float) {
+        switch source {
+        case .silent:
+            return
+        case .systemDefault:
+            playSystemDefault(volume: volume)
         case .system(let name):
-            guard let base = NSSound(named: NSSound.Name(name)) else { return }
-            // NSSound(named:) hands back a shared, cached instance; copy it so a
-            // rapid re-trigger overlaps instead of cutting the previous play off.
-            let sound = (base.copy() as? NSSound) ?? base
-            sound.volume = volume
-            sounds.append(sound)
-            sound.play()
-
+            playSystemSound(named: name, volume: volume)
         case .tone(let spec):
             guard let data = FeedbackSoundPlayer.renderWAV(spec) else { return }
             play(data: data, volume: volume)
-
         case .file(let filename):
-            let url = FeedbackSoundPlayer.soundsDirectory().appendingPathComponent(filename)
-            guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
-            play(player: player, volume: volume)
+            playImportedFile(filename, volume: volume)
+        case .mix(let mix):
+            for track in mix.tracks {
+                let trackVolume = volume * Float(max(0, min(1, track.volume)))
+                schedule(offset: track.offset) { [self] in
+                    play(track.source, volume: trackVolume)
+                }
+            }
         }
+    }
+
+    private func play(_ source: TrackSoundSource, volume: Float) {
+        switch source {
+        case .systemDefault:
+            playSystemDefault(volume: volume)
+        case .system(let name):
+            playSystemSound(named: name, volume: volume)
+        case .tone(let spec):
+            guard let data = FeedbackSoundPlayer.renderWAV(spec) else { return }
+            play(data: data, volume: volume)
+        case .file(let filename):
+            playImportedFile(filename, volume: volume)
+        }
+    }
+
+    private func playSystemDefault(volume: Float) {
+        if let url = FeedbackSoundSettings.systemDefaultSoundURL(),
+           let sound = NSSound(contentsOf: url, byReference: true) {
+            play(sound: sound, volume: volume)
+            return
+        }
+        if let sound = makeSystemSound(named: FeedbackSoundSettings.fallbackSystemSoundName) {
+            play(sound: sound, volume: volume)
+            return
+        }
+        if volume > 0.001 { NSSound.beep() }
+    }
+
+    private func playSystemSound(named name: String, volume: Float) {
+        guard let sound = makeSystemSound(named: name) else { return }
+        play(sound: sound, volume: volume)
+    }
+
+    private func makeSystemSound(named name: String) -> NSSound? {
+        if let base = NSSound(named: NSSound.Name(name)) {
+            return (base.copy() as? NSSound) ?? base
+        }
+        if let url = FeedbackSoundSettings.systemSoundURL(for: name) {
+            return NSSound(contentsOf: url, byReference: true)
+        }
+        return nil
+    }
+
+    private func play(sound: NSSound, volume: Float) {
+        guard volume > 0.001 else { return }
+        sound.volume = volume
+        sounds.append(sound)
+        sound.play()
+    }
+
+    private func playImportedFile(_ filename: String, volume: Float) {
+        guard !filename.isEmpty else { return }
+        let url = FeedbackSoundPlayer.soundsDirectory().appendingPathComponent(filename)
+        guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
+        play(player: player, volume: volume)
     }
 
     private func play(data: Data, volume: Float) {
@@ -57,6 +143,7 @@ final class FeedbackSoundPlayer {
     }
 
     private func play(player: AVAudioPlayer, volume: Float) {
+        guard volume > 0.001 else { return }
         player.volume = volume
         player.prepareToPlay()
         players.append(player)

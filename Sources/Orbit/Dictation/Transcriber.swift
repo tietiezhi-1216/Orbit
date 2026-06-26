@@ -9,12 +9,46 @@
 import Foundation
 
 enum Transcriber {
+    /// Keep every request below common 10 MB audio/body limits. 7 MB WAV leaves
+    /// headroom for Base64 inflation in chat-style audio APIs.
+    private static let maxChunkWAVBytes = 7_000_000
 
     /// Transcribe a recorded WAV, dispatching on the model's ASR protocol.
     static func transcribe(_ model: ResolvedModel, wav: Data) async throws -> String {
         switch model.wire {
         case .mimoAudioASR: return try await chatAudio(model, wav: wav)
         default:            return try await http(model, wav: wav) // Whisper multipart
+        }
+    }
+
+    /// Transcribe PCM samples. Long recordings are split into multiple WAV
+    /// requests so providers with 10 MB request/file limits don't reject them.
+    static func transcribe(_ model: ResolvedModel,
+                           samples: [Int16],
+                           rate: Int,
+                           onChunk: ((Int, Int) async -> Void)? = nil) async throws -> String {
+        let chunks = sampleChunks(samples)
+        guard chunks.count > 1 else {
+            await onChunk?(1, 1)
+            return try await transcribe(model, wav: WAV.encode(samples, rate: rate))
+        }
+
+        var parts: [String] = []
+        parts.reserveCapacity(chunks.count)
+        for (idx, chunk) in chunks.enumerated() {
+            await onChunk?(idx + 1, chunks.count)
+            let text = try await transcribe(model, wav: WAV.encode(chunk, rate: rate)).trimmed
+            if !text.isEmpty { parts.append(text) }
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static func sampleChunks(_ samples: [Int16]) -> [[Int16]] {
+        let maxPayloadBytes = max(2, maxChunkWAVBytes - WAV.headerByteCount)
+        let maxSamples = max(1, maxPayloadBytes / MemoryLayout<Int16>.size)
+        guard samples.count > maxSamples else { return [samples] }
+        return stride(from: 0, to: samples.count, by: maxSamples).map { start in
+            Array(samples[start..<min(samples.count, start + maxSamples)])
         }
     }
 
@@ -129,6 +163,8 @@ enum Transcriber {
 // MARK: - WAV encoding
 
 enum WAV {
+    static let headerByteCount = 44
+
     /// Encode mono Int16 PCM as a little-endian WAV container.
     static func encode(_ samples: [Int16], rate: Int) -> Data {
         let dataBytes = samples.withUnsafeBytes { Data($0) }   // little-endian on Apple Silicon

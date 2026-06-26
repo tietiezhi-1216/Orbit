@@ -9,6 +9,8 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    static let contentSize = CGSize(width: 440, height: 430)
+
     @ObservedObject var controller: AppController
     /// Called when the user proceeds (only enabled once everything is granted).
     var onContinue: () -> Void
@@ -48,7 +50,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 22)
             footer
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: Self.contentSize.width, height: Self.contentSize.height, alignment: .top)
         .onAppear { controller.refreshStatus() }
     }
 
@@ -57,18 +59,18 @@ struct OnboardingView: View {
     private var header: some View {
         VStack(spacing: 8) {
             Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 46))
+                .font(.system(size: 38))
                 .foregroundStyle(.tint)
                 .symbolRenderingMode(.hierarchical)
             Text("欢迎使用 Orbit")
-                .font(.title2.weight(.bold))
+                .font(.title3.weight(.bold))
             Text("开启全局语音听写前，先授予以下权限")
-                .font(.callout)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 30)
-        .padding(.bottom, 20)
+        .padding(.top, 22)
+        .padding(.bottom, 16)
         .padding(.horizontal, 22)
     }
 
@@ -93,8 +95,8 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 22)
-        .padding(.top, 20)
-        .padding(.bottom, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 18)
     }
 
     // MARK: Row
@@ -112,7 +114,7 @@ struct OnboardingView: View {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(state == .granted ? Color.green : Color.accentColor)
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Color.primary.opacity(0.06))
@@ -127,7 +129,7 @@ struct OnboardingView: View {
 
             statusControl(state: state, grant: grant, openSettings: openSettings)
         }
-        .padding(12)
+        .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(Color.primary.opacity(0.04))

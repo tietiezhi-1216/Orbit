@@ -124,7 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.titleVisibility = .hidden
             window.titlebarSeparatorStyle = .none
             window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: 440, height: 430))
+            window.isRestorable = false
+            window.contentMinSize = OnboardingView.contentSize
+            window.contentMaxSize = OnboardingView.contentSize
+            window.setContentSize(OnboardingView.contentSize)
             window.center()
             onboardingWindow = window
         }

@@ -20,6 +20,10 @@ struct DictationEntry: Identifiable, Codable, Hashable {
     /// Which template produced this (the template name), or "raw" for
     /// transcribe-only sessions. Optional so older history still decodes.
     var mode: String?
+    /// Error/cancel state when the recording did not produce final text.
+    var failure: String?
+    /// Per-stage files retained for seven days.
+    var artifacts: DictationArtifactPaths?
 
     /// The text actually delivered: the polish if present, else the raw transcript.
     var finalText: String {
@@ -32,13 +36,33 @@ struct DictationEntry: Identifiable, Codable, Hashable {
          transcript: String,
          polished: String? = nil,
          inserted: Bool,
-         mode: String? = nil) {
+         mode: String? = nil,
+         failure: String? = nil,
+         artifacts: DictationArtifactPaths? = nil) {
         self.id = id
         self.date = date
         self.transcript = transcript
         self.polished = polished
         self.inserted = inserted
         self.mode = mode
+        self.failure = failure
+        self.artifacts = artifacts
+    }
+}
+
+extension DictationEntry {
+    var audioURL: URL? { fileURL(artifacts?.audioPath) }
+    var transcriptFileURL: URL? { fileURL(artifacts?.transcriptPath) }
+    var polishedFileURL: URL? { fileURL(artifacts?.polishedPath) }
+    var artifactDirectoryURL: URL? { fileURL(artifacts?.directoryPath, mustExist: true) }
+    var expiresAt: Date {
+        date.addingTimeInterval(Double(DictationAudioArchive.retentionDays) * 24 * 60 * 60)
+    }
+
+    private func fileURL(_ path: String?, mustExist: Bool = false) -> URL? {
+        guard let path, !path.isEmpty else { return nil }
+        if mustExist, !FileManager.default.fileExists(atPath: path) { return nil }
+        return URL(fileURLWithPath: path)
     }
 }
 
@@ -47,32 +71,58 @@ final class DictationHistoryStore: ObservableObject {
     @Published private(set) var entries: [DictationEntry] = []
 
     private let fileURL: URL
-    private let maxEntries = 200
+    private var pruneTimer: Timer?
 
     init() {
         let dir = SettingsStore.configDirectory()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("history.json")
         load()
+        pruneExpired()
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pruneExpired() }
+        }
     }
 
     /// Record a new result at the top of the list.
     func add(_ entry: DictationEntry) {
         entries.insert(entry, at: 0)
-        if entries.count > maxEntries {
-            entries.removeLast(entries.count - maxEntries)
-        }
+        pruneExpired(saveAfter: false)
         save()
     }
 
     func remove(id: String) {
+        entries.first(where: { $0.id == id }).map { DictationAudioArchive.delete($0.artifacts) }
         entries.removeAll { $0.id == id }
         save()
     }
 
     func clear() {
+        for entry in entries {
+            DictationAudioArchive.delete(entry.artifacts)
+        }
+        DictationAudioArchive.clearAll()
         entries.removeAll()
         save()
+    }
+
+    func pruneExpired() {
+        pruneExpired(saveAfter: true)
+    }
+
+    private func pruneExpired(saveAfter: Bool) {
+        let cutoff = Date().addingTimeInterval(-Double(DictationAudioArchive.retentionDays) * 24 * 60 * 60)
+        let expired = entries.filter { $0.date < cutoff }
+        guard !expired.isEmpty else {
+            DictationAudioArchive.pruneExpired()
+            return
+        }
+        for entry in expired {
+            DictationAudioArchive.delete(entry.artifacts)
+        }
+        entries.removeAll { $0.date < cutoff }
+        DictationAudioArchive.pruneExpired()
+        if saveAfter { save() }
     }
 
     // MARK: - Persistence

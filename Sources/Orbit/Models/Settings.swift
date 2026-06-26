@@ -302,6 +302,25 @@ enum ModelKind: String, Codable, Hashable {
     var capability: Capability { self == .asr ? .asr : .chat }
 }
 
+/// Explicit user-managed capability flags for LLM/chat models. Defaults are
+/// intentionally "no" so old or imported models never silently claim support
+/// for multimodal input, reasoning/thinking, or tool calling.
+struct LLMCapabilities: Codable, Hashable {
+    var multimodal: Bool
+    var thinking: Bool
+    var toolCalling: Bool
+
+    static let none = LLMCapabilities(multimodal: false, thinking: false, toolCalling: false)
+
+    var summary: String {
+        [
+            "多模态：\(multimodal ? "是" : "否")",
+            "思考：\(thinking ? "是" : "否")",
+            "工具：\(toolCalling ? "是" : "否")"
+        ].joined(separator: " · ")
+    }
+}
+
 /// A concrete model belonging to a provider, attached to one of the provider's
 /// services. The service decides the capability / wire / endpoint.
 struct ModelConfig: Identifiable, Codable, Hashable {
@@ -318,6 +337,8 @@ struct ModelConfig: Identifiable, Codable, Hashable {
     var language: String?
     /// Capability-specific extra params (e.g. image size, tts voice). Free-form.
     var params: [String: String]?
+    /// LLM-only feature flags surfaced in model lists and chat selection.
+    var llmCapabilities: LLMCapabilities
 
     /// Transient: the role read from a legacy config, used by `migrate` to pick
     /// a service. Never persisted.
@@ -329,7 +350,8 @@ struct ModelConfig: Identifiable, Codable, Hashable {
          name: String,
          model: String,
          language: String? = nil,
-         params: [String: String]? = nil) {
+         params: [String: String]? = nil,
+         llmCapabilities: LLMCapabilities = .none) {
         self.id = id
         self.providerID = providerID
         self.serviceID = serviceID
@@ -337,11 +359,12 @@ struct ModelConfig: Identifiable, Codable, Hashable {
         self.model = model
         self.language = language
         self.params = params
+        self.llmCapabilities = llmCapabilities
         self.legacyKind = nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, providerID, serviceID, name, model, language, params
+        case id, providerID, serviceID, name, model, language, params, llmCapabilities
         case kind       // legacy role; decode-only.
         case transport  // legacy transport; ignored.
     }
@@ -355,6 +378,7 @@ struct ModelConfig: Identifiable, Codable, Hashable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         language = try c.decodeIfPresent(String.self, forKey: .language)
         params = try c.decodeIfPresent([String: String].self, forKey: .params)
+        llmCapabilities = (try? c.decode(LLMCapabilities.self, forKey: .llmCapabilities)) ?? .none
         legacyKind = try? c.decode(ModelKind.self, forKey: .kind)
         // Old `transport` (http / realtime_ws / volcano_ws) no longer exists.
     }
@@ -369,6 +393,7 @@ struct ModelConfig: Identifiable, Codable, Hashable {
         try c.encode(model, forKey: .model)
         try c.encodeIfPresent(language, forKey: .language)
         try c.encodeIfPresent(params, forKey: .params)
+        try c.encode(llmCapabilities, forKey: .llmCapabilities)
     }
 }
 
@@ -509,14 +534,26 @@ struct Settings: Codable {
 
     func provider(id: String) -> Provider? { providers.first { $0.id == id } }
 
+    var chatModels: [ModelConfig] {
+        models.filter { capability(of: $0) == .chat }
+    }
+
+    var asrModels: [ModelConfig] {
+        models.filter { capability(of: $0) == .asr }
+    }
+
     var asrModel: ModelConfig? {
-        guard let id = asrModelID else { return nil }
-        return models.first { $0.id == id }
+        guard let id = asrModelID,
+              let model = models.first(where: { $0.id == id }),
+              capability(of: model) == .asr else { return nil }
+        return model
     }
 
     var llmModel: ModelConfig? {
-        guard let id = llmModelID else { return nil }
-        return models.first { $0.id == id }
+        guard let id = llmModelID,
+              let model = models.first(where: { $0.id == id }),
+              capability(of: model) == .chat else { return nil }
+        return model
     }
 
     var activeTemplate: PromptTemplate? {

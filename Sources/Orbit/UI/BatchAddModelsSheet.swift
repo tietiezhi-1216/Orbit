@@ -27,6 +27,7 @@ struct BatchAddModelsSheet: View {
     @State private var rows: [Row] = []
     @State private var selection: Set<String> = []
     @State private var search = ""
+    @State private var llmCapabilities: LLMCapabilities = .none
     @State private var loading = false
     @State private var failures: [String] = []
     @State private var didFetch = false
@@ -66,7 +67,7 @@ struct BatchAddModelsSheet: View {
             Divider()
             footer
         }
-        .frame(width: 620, height: 580)
+        .frame(width: 640, height: wire.capability == .chat ? 650 : 580)
     }
 
     // MARK: Sections
@@ -94,6 +95,9 @@ struct BatchAddModelsSheet: View {
                     }
                 }
                 .fixedSize()
+                .onChange(of: wire) { _, newWire in
+                    if newWire.capability != .chat { llmCapabilities = .none }
+                }
 
                 Spacer()
 
@@ -106,6 +110,22 @@ struct BatchAddModelsSheet: View {
             Text("先选「协议」再获取——所选协议会套用到这一批所有勾选的模型；不同协议（如聊天 / 语音识别）分批添加。")
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if wire.capability == .chat {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("这批 LLM 的能力标记")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Toggle("多模态", isOn: capabilityBinding(\.multimodal))
+                        Toggle("思考", isOn: capabilityBinding(\.thinking))
+                        Toggle("工具调用", isOn: capabilityBinding(\.toolCalling))
+                    }
+                    LLMCapabilityBadges(capabilities: llmCapabilities)
+                }
+                .toggleStyle(.checkbox)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if !failures.isEmpty {
                 ForEach(failures, id: \.self) { f in
@@ -218,6 +238,13 @@ struct BatchAddModelsSheet: View {
         existingKeys.contains("\(row.providerID)|\(wire.rawValue)|\(row.model)")
     }
 
+    private func capabilityBinding(_ keyPath: WritableKeyPath<LLMCapabilities, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { llmCapabilities[keyPath: keyPath] },
+            set: { llmCapabilities[keyPath: keyPath] = $0 }
+        )
+    }
+
     private func fetch() {
         loading = true
         didFetch = true
@@ -263,7 +290,8 @@ struct BatchAddModelsSheet: View {
                 providerID: row.providerID,
                 serviceID: sid,
                 name: row.model,
-                model: row.model
+                model: row.model,
+                llmCapabilities: wire.capability == .chat ? llmCapabilities : .none
             ))
         }
         dismiss()

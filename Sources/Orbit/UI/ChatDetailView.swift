@@ -7,6 +7,7 @@ import AppKit
 
 struct ChatDetailView: View {
     @EnvironmentObject var chat: ChatStore
+    @EnvironmentObject private var store: SettingsStore
     @EnvironmentObject private var app: AppController
 
     let openSettings: () -> Void
@@ -20,7 +21,15 @@ struct ChatDetailView: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !streamingHere
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !streamingHere && chat.hasLLM
+    }
+
+    private var chatModels: [ModelConfig] {
+        store.settings.chatModels
+    }
+
+    private var selectedLLM: ModelConfig? {
+        store.settings.llmModel
     }
 
     var body: some View {
@@ -35,6 +44,8 @@ struct ChatDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { ensureValidLLMSelection() }
+        .onChange(of: store.settings.models) { _, _ in ensureValidLLMSelection() }
     }
 
     // MARK: - Transcript
@@ -79,7 +90,7 @@ struct ChatDetailView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            if !chat.hasLLM {
+            if chatModels.isEmpty {
                 Text("尚未配置大模型")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                 Text("进入「设置 → 模型」添加一个大模型并选为当前大模型。")
@@ -94,10 +105,17 @@ struct ChatDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .padding(.top, 8)
+            } else if !chat.hasLLM {
+                Text("请选择大模型")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                Text("在下方对话框选择本次对话要使用的 LLM。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             } else {
                 Text("开始一个新对话")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
-                Text("在下方输入问题，Orbit 会在这里生成回复。")
+                Text("在下方选择模型并输入问题，Orbit 会在这里生成回复。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -112,37 +130,47 @@ struct ChatDetailView: View {
     private var composer: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField("给 Orbit 发消息…", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.secondary.opacity(0.20)))
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    modelSelector
+                    if let selectedLLM {
+                        LLMCapabilityBadges(capabilities: selectedLLM.llmCapabilities, compact: true)
+                    }
+                    Spacer(minLength: 0)
+                }
 
-                if streamingHere {
-                    Button { chat.cancel() } label: {
-                        Image(systemName: "stop.fill")
-                            .foregroundStyle(.primary)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(Color.secondary.opacity(0.22)))
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField(chat.hasLLM ? "给 Orbit 发消息…" : "先选择一个大模型…", text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...6)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.20)))
+
+                    if streamingHere {
+                        Button { chat.cancel() } label: {
+                            Image(systemName: "stop.fill")
+                                .foregroundStyle(.primary)
+                                .frame(width: 34, height: 34)
+                                .background(Circle().fill(Color.secondary.opacity(0.22)))
+                        }
+                        .buttonStyle(.plain)
+                        .help("停止")
+                    } else {
+                        Button { send() } label: {
+                            Image(systemName: "arrow.up")
+                                .fontWeight(.bold)
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSend)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help(chat.hasLLM ? "发送（⌘↩）" : "先选择大模型")
                     }
-                    .buttonStyle(.plain)
-                    .help("停止")
-                } else {
-                    Button { send() } label: {
-                        Image(systemName: "arrow.up")
-                            .fontWeight(.bold)
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4)))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("发送（⌘↩）")
                 }
             }
             .padding(.horizontal, 22)
@@ -151,10 +179,67 @@ struct ChatDetailView: View {
         .background(.bar)
     }
 
+    private var modelSelector: some View {
+        Menu {
+            if chatModels.isEmpty {
+                Button("添加大模型…") { app.openSettingsWorkspace(.models) }
+            } else {
+                ForEach(chatModels) { model in
+                    Button {
+                        store.settings.llmModelID = model.id
+                    } label: {
+                        Label(
+                            "\(model.name) · \(model.llmCapabilities.summary)",
+                            systemImage: model.id == store.settings.llmModelID ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                }
+                Divider()
+                Button("管理模型…") { app.openSettingsWorkspace(.models) }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "brain.head.profile")
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(selectedLLM?.name ?? "选择大模型")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(selectedLLM?.model ?? "LLM")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.18))
+            )
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .disabled(streamingHere)
+        .help(selectedLLM?.llmCapabilities.summary ?? "选择聊天使用的大语言模型")
+    }
+
     private func send() {
         let text = draft
         draft = ""
         chat.send(text)
+    }
+
+    private func ensureValidLLMSelection() {
+        if let id = store.settings.llmModelID,
+           chatModels.contains(where: { $0.id == id }) {
+            return
+        }
+        store.settings.llmModelID = chatModels.first?.id
     }
 }
 

@@ -11,10 +11,10 @@ struct DictationBasicView: View {
     @EnvironmentObject var app: AppController
 
     private var asrModels: [ModelConfig] {
-        store.settings.models.filter { store.settings.capability(of: $0) == .asr }
+        store.settings.asrModels
     }
     private var chatModels: [ModelConfig] {
-        store.settings.models.filter { store.settings.capability(of: $0) == .chat }
+        store.settings.chatModels
     }
 
     /// Working languages edited as a comma-separated field.

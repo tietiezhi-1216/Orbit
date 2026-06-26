@@ -36,3 +36,58 @@ struct RevealableSecureField: View {
         }
     }
 }
+
+struct LLMCapabilityBadges: View {
+    let capabilities: LLMCapabilities
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: compact ? 4 : 6) {
+            LLMCapabilityBadge(
+                title: "多模态",
+                supported: capabilities.multimodal,
+                compact: compact
+            )
+            LLMCapabilityBadge(
+                title: "思考",
+                supported: capabilities.thinking,
+                compact: compact
+            )
+            LLMCapabilityBadge(
+                title: "工具",
+                supported: capabilities.toolCalling,
+                compact: compact
+            )
+        }
+        .lineLimit(1)
+    }
+}
+
+private struct LLMCapabilityBadge: View {
+    let title: String
+    let supported: Bool
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: supported ? "checkmark.circle.fill" : "xmark.circle")
+                .imageScale(.small)
+            if compact {
+                Text(title)
+                Text(supported ? "是" : "否")
+                    .fontWeight(.semibold)
+            } else {
+                Text("\(title)：\(supported ? "是" : "否")")
+            }
+        }
+        .font(compact ? .caption2 : .caption)
+        .foregroundStyle(supported ? Color.green : Color.secondary)
+        .padding(.horizontal, compact ? 5 : 7)
+        .padding(.vertical, compact ? 2 : 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(supported ? Color.green.opacity(0.12) : Color.secondary.opacity(0.10))
+        )
+        .help("\(title)：\(supported ? "支持" : "不支持")")
+    }
+}

@@ -58,9 +58,10 @@ final class SettingsStore: ObservableObject {
             s.models[i].serviceID = match?.id
         }
 
-        // Clear any active selections left dangling by the cleanup above.
-        if let a = s.asrModelID, !s.models.contains(where: { $0.id == a }) { s.asrModelID = nil }
-        if let l = s.llmModelID, !s.models.contains(where: { $0.id == l }) { s.llmModelID = nil }
+        // Clear any active selections left dangling by the cleanup above, or
+        // pointing at the wrong service class.
+        if s.asrModel == nil { s.asrModelID = nil }
+        if s.llmModel == nil { s.llmModelID = nil }
     }
 
     // MARK: Paths
@@ -167,23 +168,22 @@ final class SettingsStore: ObservableObject {
 
     func updateSoundCue(id: String, _ mutate: (inout SoundCue) -> Void) {
         guard let i = settings.feedbackSounds.cues.firstIndex(where: { $0.id == id }) else { return }
+        guard !settings.feedbackSounds.cues[i].isBuiltInSystemCue else { return }
+        let before = settings.feedbackSounds.cues[i]
         mutate(&settings.feedbackSounds.cues[i])
+        deleteUnreferencedImportedFiles(previouslyReferencedBy: before)
     }
 
     func removeSoundCue(id: String) {
         let removed = settings.feedbackSounds.cues.first { $0.id == id }
+        guard removed?.isBuiltInSystemCue != true else { return }
         settings.feedbackSounds.cues.removeAll { $0.id == id }
         // Drop any event bindings that pointed at it.
         for (event, cueID) in settings.feedbackSounds.bindings where cueID == id {
             settings.feedbackSounds.bindings.removeValue(forKey: event)
         }
-        // If it was an imported file and nothing else references that file, delete it.
-        if case .file(let filename)? = removed?.source, !filename.isEmpty {
-            let stillUsed = settings.feedbackSounds.cues.contains {
-                if case .file(let other) = $0.source { return other == filename }
-                return false
-            }
-            if !stillUsed { FeedbackSoundPlayer.deleteFile(filename: filename) }
+        if let removed {
+            deleteUnreferencedImportedFiles(previouslyReferencedBy: removed)
         }
     }
 
@@ -193,6 +193,13 @@ final class SettingsStore: ObservableObject {
             settings.feedbackSounds.bindings[event.rawValue] = cueID
         } else {
             settings.feedbackSounds.bindings.removeValue(forKey: event.rawValue)
+        }
+    }
+
+    private func deleteUnreferencedImportedFiles(previouslyReferencedBy cue: SoundCue) {
+        let active = Set(settings.feedbackSounds.cues.flatMap(\.importedFilenames))
+        for filename in Set(cue.importedFilenames) where !active.contains(filename) {
+            FeedbackSoundPlayer.deleteFile(filename: filename)
         }
     }
 }

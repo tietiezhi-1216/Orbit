@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var historyStore: DictationHistoryStore!
     private var usageStore: UsageStore!
     private var generationStore: GenerationStore!
+    private var toolRegistry: ToolRegistry!
 
     private var statusItem: NSStatusItem!
     private var chatWindow: NSWindow?
@@ -32,8 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store = SettingsStore()
         controller = AppController(store: store)
         usageStore = UsageStore()
-        chatStore = ChatStore(settings: store, usage: usageStore)
         generationStore = GenerationStore(settings: store, usage: usageStore)
+        toolRegistry = ToolRegistry()
+        toolRegistry.register(GenerateImageTool(settings: store, generation: generationStore))
+        chatStore = ChatStore(settings: store, usage: usageStore, tools: toolRegistry)
         historyStore = DictationHistoryStore()
         dictationQueue = DictationQueue(store: store, history: historyStore, usage: usageStore)
         recordingState = RecordingState()

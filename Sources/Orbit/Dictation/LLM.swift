@@ -32,11 +32,11 @@ enum LLM {
         messages.append(ChatMessage(role: .user, content: user))
 
         var full = ""
-        let usage = try await ChatClient.stream(model: model, messages: messages) { piece in
+        let outcome = try await ChatClient.stream(model: model, messages: messages) { piece in
             full += piece
             onDelta(piece)
         }
-        return (full.trimmed, usage)
+        return (full.trimmed, outcome.usage)
     }
 
     /// Streaming polish: same prompt as `polish`, but deltas are delivered to

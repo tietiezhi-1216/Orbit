@@ -16,11 +16,16 @@ final class ChatStore: ObservableObject {
 
     private let settings: SettingsStore
     private let usage: UsageStore
+    private let tools: ToolRegistry
     private var streamTask: Task<Void, Never>?
 
-    init(settings: SettingsStore, usage: UsageStore) {
+    /// Safety cap on model→tool→model rounds within one send.
+    private let maxToolRounds = 5
+
+    init(settings: SettingsStore, usage: UsageStore, tools: ToolRegistry) {
         self.settings = settings
         self.usage = usage
+        self.tools = tools
     }
 
     var selected: Conversation? {
@@ -116,9 +121,10 @@ final class ChatStore: ObservableObject {
         let aid = assistant.id
         // Build the request history BEFORE adding the placeholder, dropping any
         // empty assistant turns (e.g. a prior interrupted reply) some strict
-        // servers reject.
+        // servers reject — but keeping tool-call turns, whose text may be empty
+        // yet must stay paired with their tool results.
         let history = conversations[ci].messages.filter {
-            !($0.role == .assistant && $0.content.trimmed.isEmpty)
+            !($0.role == .assistant && $0.content.trimmed.isEmpty && ($0.toolCalls ?? []).isEmpty)
         }
         conversations[ci].messages.append(assistant)
 
@@ -127,22 +133,66 @@ final class ChatStore: ObservableObject {
         streamingMessageID = aid
         streamTask = Task { [weak self] in
             guard let self else { return }
+            // Offer tools only when the model is flagged tool-capable, on wires
+            // the tool loop supports, and there is something to offer.
+            let toolSpecs: [ToolSpec]
+            if let cfg = self.settings.settings.llmModel,
+               cfg.llmCapabilities.toolCalling,
+               model.wire == .openAIChat || model.wire == .anthropicMessages,
+               !self.tools.isEmpty {
+                toolSpecs = self.tools.specs
+            } else {
+                toolSpecs = []
+            }
+
+            var turn = history
+            var currentAID = aid
+            var rounds = 0
             do {
-                let tokens = try await ChatClient.stream(model: model, messages: history) { piece in
-                    self.appendDelta(piece, conversationID: cid, messageID: aid)
+                // The tool loop: stream → if the model requested tools, run them,
+                // feed results back, and stream again — until a plain answer.
+                while true {
+                    let outcome = try await ChatClient.stream(
+                        model: model, messages: turn, tools: toolSpecs
+                    ) { piece in
+                        self.appendDelta(piece, conversationID: cid, messageID: currentAID)
+                    }
+                    if let cfg = self.settings.settings.llmModel, !outcome.usage.isEmpty {
+                        self.usage.add(self.settings.settings.usageRecord(
+                            for: cfg, source: "chat", date: Date(), usage: outcome.usage))
+                    }
+                    guard !outcome.toolCalls.isEmpty, rounds < self.maxToolRounds else {
+                        // Completed with no content at all → leave a visible note
+                        // rather than a permanently empty bubble.
+                        self.noteIfEmpty(conversationID: cid, messageID: currentAID)
+                        break
+                    }
+                    rounds += 1
+
+                    // Freeze this round's assistant turn (its text + the calls).
+                    let assistantText = self.messageContent(conversationID: cid, messageID: currentAID) ?? ""
+                    self.attachToolCalls(outcome.toolCalls, conversationID: cid, messageID: currentAID)
+                    turn.append(ChatMessage(role: .assistant, content: assistantText,
+                                            toolCalls: outcome.toolCalls))
+
+                    // Run every requested tool; failures go back as tool errors so
+                    // the model can react instead of the turn dying.
+                    for call in outcome.toolCalls {
+                        let toolMessage = await self.runTool(call)
+                        self.appendMessage(toolMessage, conversationID: cid)
+                        turn.append(toolMessage)
+                    }
+
+                    // Fresh assistant bubble for the model's follow-up round.
+                    let next = ChatMessage(role: .assistant, content: "")
+                    currentAID = next.id
+                    self.appendMessage(next, conversationID: cid)
+                    self.streamingMessageID = currentAID
                 }
-                // Record token usage + cost for the chat turn.
-                if let cfg = self.settings.settings.llmModel, !tokens.isEmpty {
-                    self.usage.add(self.settings.settings.usageRecord(
-                        for: cfg, source: "chat", date: Date(), usage: tokens))
-                }
-                // Completed with no content at all → leave a visible note rather
-                // than a permanently empty bubble.
-                self.noteIfEmpty(conversationID: cid, messageID: aid)
             } catch {
                 if !Task.isCancelled && !(error is CancellationError) {
                     self.appendDelta("\n\n[出错] \(error.localizedDescription)",
-                                     conversationID: cid, messageID: aid)
+                                     conversationID: cid, messageID: currentAID)
                 }
             }
             self.isStreaming = false
@@ -152,10 +202,50 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    /// Execute one tool call and wrap the outcome as a `.tool` transcript message.
+    private func runTool(_ call: ToolCall) async -> ChatMessage {
+        let result: ToolResult
+        var attachments: [String] = []
+        if let tool = tools.tool(named: call.name) {
+            do {
+                let args = (try? JSONSerialization.jsonObject(
+                    with: Data(call.argumentsJSON.utf8))) as? [String: Any] ?? [:]
+                let output = try await tool.run(args)
+                result = ToolResult(toolCallID: call.id, content: output.content, isError: false)
+                attachments = output.attachments
+            } catch {
+                result = ToolResult(toolCallID: call.id,
+                                    content: "工具执行失败：\(error.localizedDescription)",
+                                    isError: true)
+            }
+        } else {
+            result = ToolResult(toolCallID: call.id, content: "未知工具：\(call.name)", isError: true)
+        }
+        return ChatMessage(role: .tool, content: "", toolResult: result,
+                           attachments: attachments.isEmpty ? nil : attachments)
+    }
+
     private func appendDelta(_ piece: String, conversationID: UUID, messageID: UUID) {
         guard let ci = conversations.firstIndex(where: { $0.id == conversationID }),
               let mi = conversations[ci].messages.firstIndex(where: { $0.id == messageID }) else { return }
         conversations[ci].messages[mi].content += piece
+    }
+
+    private func appendMessage(_ message: ChatMessage, conversationID: UUID) {
+        guard let ci = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        conversations[ci].messages.append(message)
+    }
+
+    private func messageContent(conversationID: UUID, messageID: UUID) -> String? {
+        guard let ci = conversations.firstIndex(where: { $0.id == conversationID }),
+              let mi = conversations[ci].messages.firstIndex(where: { $0.id == messageID }) else { return nil }
+        return conversations[ci].messages[mi].content
+    }
+
+    private func attachToolCalls(_ calls: [ToolCall], conversationID: UUID, messageID: UUID) {
+        guard let ci = conversations.firstIndex(where: { $0.id == conversationID }),
+              let mi = conversations[ci].messages.firstIndex(where: { $0.id == messageID }) else { return }
+        conversations[ci].messages[mi].toolCalls = calls
     }
 
     private func noteIfEmpty(conversationID: UUID, messageID: UUID) {

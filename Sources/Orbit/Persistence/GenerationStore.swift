@@ -50,30 +50,42 @@ final class GenerationStore: ObservableObject {
 
     // MARK: - Image generation
 
-    func generateImage(model: ModelConfig, prompt: String, params: [String: String]) {
+    /// Awaitable core: generate, archive, record usage, return the new items.
+    /// Used by both the 创作 panel and the chat `generate_image` skill so a
+    /// model-triggered generation lands in the same history/cost pipeline.
+    func generateImageNow(model: ModelConfig, prompt: String, params: [String: String]) async throws -> [GeneratedItem] {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isGenerating else { return }
+        guard !trimmed.isEmpty else { throw OrbitError("提示词为空。") }
         guard let resolved = settings.settings.resolve(model) else {
-            lastError = "无法解析所选图像模型。"; return
+            throw OrbitError("无法解析所选图像模型。")
         }
+        let label = settings.settings.displayLabel(for: model)
+        let assets = try await ImageClient.generate(resolved, prompt: trimmed, params: params)
+        var newItems: [GeneratedItem] = []
+        for asset in assets {
+            let id = UUID().uuidString
+            let name = "\(id).\(asset.ext)"
+            try? asset.data.write(to: Self.directory.appendingPathComponent(name), options: .atomic)
+            newItems.append(GeneratedItem(
+                id: id, date: Date(), kind: "image", prompt: trimmed,
+                modelLabel: label, fileName: name, revisedPrompt: asset.revisedPrompt))
+        }
+        items.insert(contentsOf: newItems, at: 0)
+        // Per-call cost (image is billed per request; token usage n/a).
+        usage.add(settings.settings.usageRecord(for: model, source: "image", date: Date()))
+        save()
+        return newItems
+    }
+
+    /// Fire-and-forget wrapper driving the panel's @Published state.
+    func generateImage(model: ModelConfig, prompt: String, params: [String: String]) {
+        guard !isGenerating else { return }
         isGenerating = true
         lastError = nil
-        let label = settings.settings.displayLabel(for: model)
         task = Task { [weak self] in
             guard let self else { return }
             do {
-                let assets = try await ImageClient.generate(resolved, prompt: trimmed, params: params)
-                for asset in assets {
-                    let id = UUID().uuidString
-                    let name = "\(id).\(asset.ext)"
-                    try? asset.data.write(to: Self.directory.appendingPathComponent(name), options: .atomic)
-                    self.items.insert(GeneratedItem(
-                        id: id, date: Date(), kind: "image", prompt: trimmed,
-                        modelLabel: label, fileName: name, revisedPrompt: asset.revisedPrompt), at: 0)
-                }
-                // Per-call cost (image is billed per request; token usage n/a).
-                self.usage.add(self.settings.settings.usageRecord(for: model, source: "image", date: Date()))
-                self.save()
+                _ = try await self.generateImageNow(model: model, prompt: prompt, params: params)
             } catch {
                 if !Task.isCancelled && !(error is CancellationError) {
                     self.lastError = error.localizedDescription

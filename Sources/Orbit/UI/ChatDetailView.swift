@@ -56,7 +56,10 @@ struct ChatDetailView: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(convo.messages) { message in
                         Group {
-                            if message.role == .assistant && message.content.isEmpty {
+                            if message.role == .tool {
+                                ToolResultRow(message: message)
+                            } else if message.role == .assistant && message.content.isEmpty
+                                        && (message.toolCalls ?? []).isEmpty {
                                 ThinkingRow()
                             } else {
                                 MessageRow(message: message)
@@ -267,11 +270,60 @@ private struct MessageRow: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Color.accentColor)
                     .padding(.top, 2)
-                // Assistant replies render basic Markdown.
-                Text(.init(message.content))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 6) {
+                    if !message.content.isEmpty {
+                        // Assistant replies render basic Markdown.
+                        Text(.init(message.content))
+                            .textSelection(.enabled)
+                    }
+                    ForEach(message.toolCalls ?? [], id: \.id) { call in
+                        Label("调用技能 \(call.name)", systemImage: "wand.and.stars")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+    }
+}
+
+/// A tool's outcome in the transcript: a status chip plus any produced assets
+/// (generated images render inline; double-click opens the file).
+private struct ToolResultRow: View {
+    let message: ChatMessage
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: message.toolResult?.isError == true
+                  ? "exclamationmark.triangle" : "checkmark.seal")
+                .font(.system(size: 13))
+                .foregroundStyle(message.toolResult?.isError == true ? Color.orange : Color.green)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 8) {
+                if message.toolResult?.isError == true {
+                    Text(message.toolResult?.content ?? "")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    Text("技能执行完成")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(message.attachments ?? [], id: \.self) { path in
+                    if let img = NSImage(contentsOfFile: path) {
+                        Image(nsImage: img)
+                            .resizable().aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 360, maxHeight: 360)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .onTapGesture(count: 2) {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                            }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

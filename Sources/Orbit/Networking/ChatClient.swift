@@ -8,19 +8,28 @@ import Foundation
 
 enum ChatClient {
 
+    /// What a completed stream produced besides the text deltas: provider-reported
+    /// usage and any tool invocations the model requested.
+    struct StreamOutcome {
+        var usage = TokenUsage()
+        var toolCalls: [ToolCall] = []
+    }
+
     /// Stream a reply, delivering each content delta to `onDelta` on the main
-    /// actor. Returns the token usage reported by the provider (empty if none).
-    /// Throws on bad config / non-200 / transport error.
+    /// actor. Pass `tools` to offer function calling (encoded per wire); any
+    /// tool calls the model makes are accumulated from the stream fragments and
+    /// returned in the outcome. Throws on bad config / non-200 / transport error.
     @discardableResult
     static func stream(
         model: ResolvedModel,
         messages: [ChatMessage],
+        tools: [ToolSpec] = [],
         onDelta: @MainActor @escaping (String) -> Void
-    ) async throws -> TokenUsage {
+    ) async throws -> StreamOutcome {
         guard !model.apiKey.trimmed.isEmpty else {
             throw OrbitError("所选大模型服务商缺少 API Key。")
         }
-        let req = try buildRequest(model: model, messages: messages, stream: true)
+        let req = try buildRequest(model: model, messages: messages, tools: tools, stream: true)
 
         let (bytes, resp) = try await URLSession.shared.bytes(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -36,8 +45,21 @@ enum ChatClient {
         // Each SSE event is a `data: {json}` line. Blank / keep-alive / `event:`
         // lines and malformed chunks are skipped. Usage arrives in a trailing
         // chunk (OpenAI, with stream_options) or across message_start/_delta
-        // (Anthropic), so we accumulate it as we go.
-        var usage = TokenUsage()
+        // (Anthropic). Tool calls arrive as fragments — OpenAI streams the id +
+        // name first and the JSON arguments in pieces keyed by `index`;
+        // Anthropic opens a tool_use block then streams input_json_delta — so
+        // both are accumulated in an index-keyed builder and finalized at end.
+        var outcome = StreamOutcome()
+        var toolBuilders: [Int: (id: String, name: String, args: String)] = [:]
+
+        func finish() -> StreamOutcome {
+            outcome.toolCalls = toolBuilders.sorted { $0.key < $1.key }.map {
+                ToolCall(id: $0.value.id, name: $0.value.name,
+                         argumentsJSON: $0.value.args.isEmpty ? "{}" : $0.value.args)
+            }
+            return outcome
+        }
+
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let chunk = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -47,19 +69,33 @@ enum ChatClient {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
 
-            switch try parse(json, wire: model.wire) {
-            case .delta(let piece): if !piece.isEmpty { await onDelta(piece) }
-            case .usage(let u): usage.merge(u)
-            case .done(let u): if let u { usage.merge(u) }; return usage
-            case .ignore: continue
+            for event in try parse(json, wire: model.wire) {
+                switch event {
+                case .delta(let piece):
+                    if !piece.isEmpty { await onDelta(piece) }
+                case .usage(let u):
+                    outcome.usage.merge(u)
+                case .toolFragment(let index, let id, let name, let args):
+                    var b = toolBuilders[index] ?? (id: "", name: "", args: "")
+                    if let id, !id.isEmpty { b.id = id }
+                    if let name, !name.isEmpty { b.name = name }
+                    b.args += args
+                    toolBuilders[index] = b
+                case .done(let u):
+                    if let u { outcome.usage.merge(u) }
+                    return finish()
+                case .ignore:
+                    continue
+                }
             }
         }
-        return usage
+        return finish()
     }
 
     // MARK: - Request building
 
-    static func buildRequest(model: ResolvedModel, messages: [ChatMessage], stream: Bool) throws -> URLRequest {
+    static func buildRequest(model: ResolvedModel, messages: [ChatMessage],
+                             tools: [ToolSpec] = [], stream: Bool) throws -> URLRequest {
         guard let url = model.url else {
             throw OrbitError("大模型 Base URL 无效。")
         }
@@ -69,69 +105,141 @@ enum ChatClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         model.authorize(&req)
         req.httpBody = try JSONSerialization.data(
-            withJSONObject: payload(model: model, messages: messages, stream: stream, temperature: 0.7)
+            withJSONObject: payload(model: model, messages: messages, tools: tools,
+                                    stream: stream, temperature: 0.7)
         )
         return req
     }
 
     /// Build the wire-specific request body.
     static func payload(model: ResolvedModel, messages: [ChatMessage],
+                        tools: [ToolSpec] = [],
                         stream: Bool, temperature: Double) -> [String: Any] {
         switch model.wire {
-        case .openAIChat:
-            var p: [String: Any] = [
-                "model": model.model,
-                "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
-                "stream": stream,
-                "temperature": temperature,
-            ]
-            // Ask OpenAI-compatible servers to emit a final usage chunk.
-            if stream { p["stream_options"] = ["include_usage": true] }
-            return p
-        case .openAIResponses:
-            var p: [String: Any] = [
-                "model": model.model,
-                "input": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
-                "temperature": temperature,
-            ]
-            if stream { p["stream"] = true }
-            return p
         case .anthropicMessages:
             // Anthropic carries the prompt's system text as a top-level field;
-            // `messages` holds only the user / assistant turns.
+            // `messages` holds only the user / assistant turns. Tool traffic is
+            // structured content blocks, not a `tool` role.
             let system = messages.filter { $0.role == .system }
                 .map(\.content).joined(separator: "\n\n")
-            let turns = messages.filter { $0.role != .system }
-                .map { ["role": $0.role.rawValue, "content": $0.content] }
             var p: [String: Any] = [
                 "model": model.model,
-                "messages": turns,
+                "messages": anthropicTurns(messages),
                 "max_tokens": 4096,
                 "temperature": temperature,
             ]
             if stream { p["stream"] = true }
             if !system.isEmpty { p["system"] = system }
+            if !tools.isEmpty {
+                p["tools"] = tools.map {
+                    ["name": $0.name, "description": $0.description, "input_schema": $0.parameters]
+                }
+            }
+            return p
+
+        case .openAIResponses:
+            // Tool loop not yet enabled on the Responses wire (different tool
+            // item shapes); plain text conversation only.
+            var p: [String: Any] = [
+                "model": model.model,
+                "input": messages.filter { $0.role != .tool }
+                    .map { ["role": $0.role.rawValue, "content": $0.content] },
+                "temperature": temperature,
+            ]
+            if stream { p["stream"] = true }
             return p
 
         default:
-            // Non-chat wires (embeddings / image / …) don't run through here;
-            // fall back to the Chat Completions shape for any custom chat wire.
+            // openAIChat + any custom chat wire: the Chat Completions shape.
             var p: [String: Any] = [
                 "model": model.model,
-                "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
+                "messages": messages.map(openAIMessage),
                 "stream": stream,
                 "temperature": temperature,
             ]
+            // Ask OpenAI-compatible servers to emit a final usage chunk.
             if stream { p["stream_options"] = ["include_usage": true] }
+            if !tools.isEmpty {
+                p["tools"] = tools.map {
+                    ["type": "function",
+                     "function": ["name": $0.name, "description": $0.description,
+                                  "parameters": $0.parameters]]
+                }
+            }
             return p
         }
     }
 
+    // MARK: - Message encoding (tool round-trips)
+
+    /// One message in OpenAI Chat Completions shape, including assistant
+    /// tool_calls and `role:"tool"` results.
+    private static func openAIMessage(_ m: ChatMessage) -> [String: Any] {
+        if m.role == .tool, let r = m.toolResult {
+            return ["role": "tool", "tool_call_id": r.toolCallID, "content": r.content]
+        }
+        var msg: [String: Any] = ["role": m.role.rawValue, "content": m.content]
+        if m.role == .assistant, let calls = m.toolCalls, !calls.isEmpty {
+            msg["tool_calls"] = calls.map {
+                ["id": $0.id, "type": "function",
+                 "function": ["name": $0.name, "arguments": $0.argumentsJSON]]
+            }
+        }
+        return msg
+    }
+
+    /// Anthropic turns: assistant tool calls become `tool_use` content blocks;
+    /// `.tool` messages become user `tool_result` blocks (consecutive results
+    /// merge into one user turn, and each result must directly follow its
+    /// tool_use round — which our loop's ordering guarantees).
+    private static func anthropicTurns(_ messages: [ChatMessage]) -> [[String: Any]] {
+        var turns: [[String: Any]] = []
+        var pendingResults: [[String: Any]] = []
+
+        func flushResults() {
+            guard !pendingResults.isEmpty else { return }
+            turns.append(["role": "user", "content": pendingResults])
+            pendingResults = []
+        }
+
+        for m in messages where m.role != .system {
+            if m.role == .tool, let r = m.toolResult {
+                var block: [String: Any] = ["type": "tool_result", "tool_use_id": r.toolCallID,
+                                            "content": r.content]
+                if r.isError { block["is_error"] = true }
+                pendingResults.append(block)
+                continue
+            }
+            flushResults()
+            if m.role == .assistant, let calls = m.toolCalls, !calls.isEmpty {
+                var blocks: [[String: Any]] = []
+                if !m.content.isEmpty { blocks.append(["type": "text", "text": m.content]) }
+                for call in calls {
+                    let input = (try? JSONSerialization.jsonObject(
+                        with: Data(call.argumentsJSON.utf8))) as? [String: Any] ?? [:]
+                    blocks.append(["type": "tool_use", "id": call.id, "name": call.name, "input": input])
+                }
+                turns.append(["role": "assistant", "content": blocks])
+            } else {
+                turns.append(["role": m.role.rawValue, "content": m.content])
+            }
+        }
+        flushResults()
+        return turns
+    }
+
     // MARK: - Stream parsing
 
-    private enum Event { case delta(String), usage(TokenUsage), done(TokenUsage?), ignore }
+    private enum Event {
+        case delta(String)
+        case usage(TokenUsage)
+        /// A piece of a streamed tool call, keyed by the wire's block/call index.
+        case toolFragment(index: Int, id: String?, name: String?, args: String)
+        case done(TokenUsage?)
+        case ignore
+    }
 
-    private static func parse(_ json: [String: Any], wire: Wire) throws -> Event {
+    private static func parse(_ json: [String: Any], wire: Wire) throws -> [Event] {
         // A top-level `error` object can arrive mid-stream on any protocol
         // (the server opened with 200 then failed). Surface it uniformly.
         if let err = json["error"] as? [String: Any] {
@@ -141,45 +249,77 @@ enum ChatClient {
         case .openAIResponses:
             switch json["type"] as? String {
             case "response.output_text.delta":
-                return .delta((json["delta"] as? String) ?? "")
+                return [.delta((json["delta"] as? String) ?? "")]
             case "response.completed":
                 let u = (json["response"] as? [String: Any])?["usage"] as? [String: Any]
-                return .done(u.map(responsesUsage))
+                return [.done(u.map(responsesUsage))]
             case "response.failed", "response.incomplete":
                 let e = (json["response"] as? [String: Any])?["error"] as? [String: Any]
                 throw OrbitError("大模型返回错误：\((e?["message"] as? String) ?? "未知错误")")
             default:
-                return .ignore
+                return [.ignore]
             }
 
         case .anthropicMessages:
             switch json["type"] as? String {
             case "message_start":
                 let u = (json["message"] as? [String: Any])?["usage"] as? [String: Any]
-                return u.map { .usage(anthropicInputUsage($0)) } ?? .ignore
+                return [u.map { .usage(anthropicInputUsage($0)) } ?? .ignore]
+            case "content_block_start":
+                // A tool_use block opening carries the call id + tool name; its
+                // JSON input then streams via input_json_delta fragments.
+                guard let index = json["index"] as? Int,
+                      let block = json["content_block"] as? [String: Any],
+                      (block["type"] as? String) == "tool_use"
+                else { return [.ignore] }
+                return [.toolFragment(index: index,
+                                      id: block["id"] as? String,
+                                      name: block["name"] as? String,
+                                      args: "")]
             case "content_block_delta":
-                let delta = json["delta"] as? [String: Any]
-                return .delta((delta?["text"] as? String) ?? "")
+                guard let delta = json["delta"] as? [String: Any] else { return [.ignore] }
+                if let text = delta["text"] as? String {
+                    return [.delta(text)]
+                }
+                if (delta["type"] as? String) == "input_json_delta",
+                   let partial = delta["partial_json"] as? String,
+                   let index = json["index"] as? Int {
+                    return [.toolFragment(index: index, id: nil, name: nil, args: partial)]
+                }
+                return [.ignore]
             case "message_delta":
                 let u = json["usage"] as? [String: Any]
-                return u.map { .usage(TokenUsage(output: $0["output_tokens"] as? Int)) } ?? .ignore
+                return [u.map { .usage(TokenUsage(output: $0["output_tokens"] as? Int)) } ?? .ignore]
             case "message_stop":
-                return .done(nil)
+                return [.done(nil)]
             default:
-                return .ignore
+                return [.ignore]
             }
 
         default:
             // openAIChat + any custom chat wire. The trailing usage chunk (from
             // stream_options.include_usage) has usage set and empty choices.
+            // Tool calls stream in `delta.tool_calls`: first fragment per index
+            // has the id + function name, later ones only argument pieces.
+            var events: [Event] = []
             if let u = json["usage"] as? [String: Any] {
-                return .usage(openAIUsage(u))
+                events.append(.usage(openAIUsage(u)))
             }
-            guard let choices = json["choices"] as? [[String: Any]],
-                  let delta = choices.first?["delta"] as? [String: Any],
-                  let piece = delta["content"] as? String
-            else { return .ignore }
-            return .delta(piece)
+            if let choices = json["choices"] as? [[String: Any]],
+               let delta = choices.first?["delta"] as? [String: Any] {
+                if let piece = delta["content"] as? String {
+                    events.append(.delta(piece))
+                }
+                for tc in delta["tool_calls"] as? [[String: Any]] ?? [] {
+                    let fn = tc["function"] as? [String: Any]
+                    events.append(.toolFragment(
+                        index: tc["index"] as? Int ?? 0,
+                        id: tc["id"] as? String,
+                        name: fn?["name"] as? String,
+                        args: fn?["arguments"] as? String ?? ""))
+                }
+            }
+            return events.isEmpty ? [.ignore] : events
         }
     }
 

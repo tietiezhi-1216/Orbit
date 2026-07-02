@@ -29,15 +29,16 @@ APP_PATH=""
 SIGN_IDENTITY="Orbit Self-Signed"
 sign() {
     local target="$1"
+    local identifier="$2"
     if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-        codesign --force --sign "$SIGN_IDENTITY" --identifier com.orbit.app "$target" >/dev/null 2>&1 \
+        codesign --force --sign "$SIGN_IDENTITY" --identifier "$identifier" "$target" >/dev/null 2>&1 \
             && return 0
         echo "⚠️  signing with '$SIGN_IDENTITY' failed — falling back to ad-hoc."
     else
         echo "ℹ️  no stable signing identity — using ad-hoc (run scripts/dev-signing-setup.sh once"
         echo "    so Accessibility permission survives rebuilds)."
     fi
-    codesign --force --sign - "$target" >/dev/null 2>&1 || true
+    codesign --force --sign - --identifier "$identifier" "$target" >/dev/null 2>&1 || true
 }
 
 assemble() {
@@ -45,18 +46,33 @@ assemble() {
     echo "▶ swift build -c $config"
     swift build -c "$config"
 
-    local bin app
+    local bin app bundle_id display_name
     bin="$(swift build -c "$config" --show-bin-path)"
     app="$bin/$APP_NAME.app"
+
+    # Debug builds get a distinct bundle id + name so the locally-run dev app and
+    # an installed release build stop sharing a TCC identity and clobbering each
+    # other's Microphone / Accessibility grants. configDirectory() is hardcoded to
+    # com.orbit.app, so both variants still share settings & history.
+    if [ "$config" = "debug" ]; then
+        bundle_id="com.orbit.app.dev"
+        display_name="Orbit Dev"
+    else
+        bundle_id="com.orbit.app"
+        display_name="Orbit"
+    fi
 
     rm -rf "$app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp "$bin/$APP_NAME" "$app/Contents/MacOS/$APP_NAME"
     cp "Info.plist" "$app/Contents/Info.plist"
     cp "Assets/Brand/Orbit.icns" "$app/Contents/Resources/Orbit.icns"
-    sign "$app"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName $display_name" "$app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $display_name" "$app/Contents/Info.plist"
+    sign "$app" "$bundle_id"
 
-    echo "✅ $app"
+    echo "✅ $app ($bundle_id)"
     APP_PATH="$app"
 }
 

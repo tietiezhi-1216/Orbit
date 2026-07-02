@@ -1,8 +1,16 @@
 name: Release
 
 # 仅在推送 v* tag（或手动 workflow_dispatch 指定版本）时触发：构建 release、
-# 把 Orbit.app 打成 DMG、创建 GitHub Release 并上传产物 + SHA256 + 更新清单。
-# 不打 tag 就不会发布——首版先用 CI 跑通，确认产物后再打 tag。
+# 用 Developer ID 签名 + 硬化运行时、打成 DMG、公证并 staple、创建 GitHub Release
+# 并上传产物 + SHA256 + 更新清单。
+#
+# 签名/公证需要以下 GitHub secrets（缺失则回退 ad-hoc，仅供内部测试，装机每次都要重新授权）：
+#   MACOS_CERT_P12_BASE64   Developer ID Application 证书导出的 .p12，base64 编码
+#   MACOS_CERT_PASSWORD     导出 .p12 时设的密码
+#   MACOS_NOTARY_APPLE_ID   公证用的 Apple ID（邮箱）
+#   MACOS_NOTARY_PASSWORD   该 Apple ID 的 App 专用密码（appleid.apple.com 生成）
+#   MACOS_NOTARY_TEAM_ID    团队 ID（如 LQ97GA8LY8）
+# 详见 docs/RELEASE_SIGNING.md。
 on:
   push:
     tags: ['v*']
@@ -17,8 +25,12 @@ permissions:
 
 jobs:
   release:
-    name: Build & publish (macOS · ad-hoc)
+    name: Build & publish (macOS · Developer ID)
     runs-on: macos-latest
+    env:
+      # 一处判断是否具备签名条件，后续步骤据此 gate。
+      SIGNING_AVAILABLE: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
+      NOTARIZE_AVAILABLE: ${{ secrets.MACOS_NOTARY_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +66,47 @@ jobs:
       - name: Build release bundle
         run: ./build.sh release
 
+      # Re-sign the assembled bundle with the Developer ID identity + Hardened
+      # Runtime + entitlements, overriding build.sh's ad-hoc signature. TCC binds
+      # the grant to this signature; a constant Team ID + bundle id keeps the grant
+      # across every future update.
+      - name: Sign app (Developer ID)
+        if: env.SIGNING_AVAILABLE == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="$(swift build -c release --show-bin-path)/Orbit.app"
+
+          KEYCHAIN="$RUNNER_TEMP/orbit-signing.keychain-db"
+          KP="orbit-ci-$RANDOM"
+          security create-keychain -p "$KP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KP" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" "$(security default-keychain | tr -d ' "')"
+
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KEYCHAIN" >/dev/null
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' | head -1 | awk -F'"' '{print $2}')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found in the imported cert."
+            exit 1
+          fi
+          echo "Signing with: $IDENTITY"
+
+          codesign --force --options runtime --timestamp \
+            --entitlements Orbit.entitlements \
+            --sign "$IDENTITY" --identifier com.orbit.app "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dvv "$APP" 2>&1 | head -n 8
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Package .app → dmg
         id: pkg
         run: |
@@ -67,18 +120,36 @@ jobs:
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"          # drag-to-install target
           hdiutil create -volname "Orbit ${VER}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-          shasum -a 256 "$DMG" | tee "$DMG.sha256"
-          SHA="$(cut -d ' ' -f 1 "$DMG.sha256")"
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Generate update manifest
+      # Submit the DMG to Apple, wait for the ticket, then staple it so Gatekeeper
+      # clears the download offline. Stapling rewrites the DMG, so the checksum +
+      # manifest are computed AFTER this step.
+      - name: Notarize & staple DMG
+        if: env.SIGNING_AVAILABLE == 'true' && env.NOTARIZE_AVAILABLE == 'true'
+        env:
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          DMG="${{ steps.pkg.outputs.dmg }}"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$MACOS_NOTARY_APPLE_ID" \
+            --password "$MACOS_NOTARY_PASSWORD" \
+            --team-id "$MACOS_NOTARY_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
+      - name: Checksum + update manifest
         id: manifest
         run: |
           VER="${{ steps.ver.outputs.version }}"
           TAG="${{ steps.ver.outputs.tag }}"
           DMG="${{ steps.pkg.outputs.dmg }}"
-          SHA="${{ steps.pkg.outputs.sha }}"
+          shasum -a 256 "$DMG" | tee "$DMG.sha256"
+          SHA="$(cut -d ' ' -f 1 "$DMG.sha256")"
           MANIFEST="Orbit-${VER}-update.json"
           cat > "$MANIFEST" <<EOF
           {

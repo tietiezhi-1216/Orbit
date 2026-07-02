@@ -118,7 +118,7 @@ extension ChannelAdapter {
         id: "openai", displayName: "OpenAI", symbol: "sparkles",
         defaultBaseURL: "https://api.openai.com/v1", baseURLEditable: false,
         auth: .bearer,
-        wires: [.chat: .openAIChat, .asr: .openAITranscription],
+        wires: [.chat: .openAIChat, .asr: .openAITranscription, .image: .openAIImage],
         modelSource: .remotePlusCatalog,
         catalog: [
             ModelCard("gpt-4o", name: "GPT-4o", abilities: multimodalTools, contextWindow: 128_000),
@@ -127,6 +127,8 @@ extension ChannelAdapter {
             ModelCard("gpt-4o-transcribe", capability: .asr),
             ModelCard("gpt-4o-mini-transcribe", capability: .asr),
             ModelCard("whisper-1", name: "Whisper", capability: .asr),
+            ModelCard("gpt-image-1", name: "GPT Image 1", capability: .image),
+            ModelCard("dall-e-3", name: "DALL·E 3", capability: .image),
         ],
         isCustom: false)
 
@@ -149,16 +151,19 @@ extension ChannelAdapter {
         id: "siliconflow", displayName: "SiliconFlow 硅基流动", symbol: "flowchart",
         defaultBaseURL: "https://api.siliconflow.cn/v1", baseURLEditable: false,
         auth: .bearer,
-        wires: [.chat: .openAIChat, .asr: .openAITranscription],
+        wires: [.chat: .openAIChat, .asr: .openAITranscription, .image: .siliconflowImage],
         modelSource: .remote,
-        catalog: [],
+        catalog: [
+            ModelCard("Kwai-Kolors/Kolors", name: "Kolors", capability: .image),
+            ModelCard("black-forest-labs/FLUX.1-schnell", name: "FLUX.1 schnell", capability: .image),
+        ],
         isCustom: false)
 
     static let newAPI = ChannelAdapter(
         id: "newapi", displayName: "New API（自托管）", symbol: "server.rack",
         defaultBaseURL: "", baseURLEditable: true,   // user's own host + /v1
         auth: .bearer,
-        wires: [.chat: .openAIChat, .asr: .openAITranscription],
+        wires: [.chat: .openAIChat, .asr: .openAITranscription, .image: .openAIImage],
         modelSource: .remote,
         catalog: [],
         isCustom: false)
@@ -227,7 +232,7 @@ extension ChannelAdapter {
         id: customID, displayName: "自定义 / OpenAI 兼容", symbol: "slider.horizontal.3",
         defaultBaseURL: "", baseURLEditable: true,
         auth: .bearer,
-        wires: [.chat: .openAIChat, .asr: .openAITranscription],
+        wires: [.chat: .openAIChat, .asr: .openAITranscription, .image: .openAIImage],
         modelSource: .remote,
         catalog: [],
         isCustom: true)

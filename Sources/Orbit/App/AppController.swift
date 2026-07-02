@@ -9,7 +9,14 @@ import Combine
 
 enum OrbitWorkspace {
     case chat
+    case creation
     case settings
+}
+
+/// Which design surface the 创作 workspace shows.
+enum CreationTab {
+    case image
+    case video
 }
 
 @MainActor
@@ -20,6 +27,7 @@ final class AppController: ObservableObject {
     /// sheet or a separate window.
     @Published var workspace: OrbitWorkspace = .chat
     @Published var settingsSection: SettingsSection = .providers
+    @Published var creationTab: CreationTab = .image
 
     /// True while we're listening for the next keypress to bind as the hotkey.
     @Published var capturingHotkey = false
@@ -92,6 +100,11 @@ final class AppController: ObservableObject {
 
     func openChatWorkspace() {
         workspace = .chat
+    }
+
+    func openCreationWorkspace(_ tab: CreationTab = .image) {
+        creationTab = tab
+        workspace = .creation
     }
 
     func openSettingsWorkspace(_ section: SettingsSection = .providers) {

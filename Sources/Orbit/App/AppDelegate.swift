@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var chatStore: ChatStore!
     private var historyStore: DictationHistoryStore!
     private var usageStore: UsageStore!
+    private var generationStore: GenerationStore!
 
     private var statusItem: NSStatusItem!
     private var chatWindow: NSWindow?
@@ -32,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = AppController(store: store)
         usageStore = UsageStore()
         chatStore = ChatStore(settings: store, usage: usageStore)
+        generationStore = GenerationStore(settings: store, usage: usageStore)
         historyStore = DictationHistoryStore()
         dictationQueue = DictationQueue(store: store, history: historyStore, usage: usageStore)
         recordingState = RecordingState()
@@ -231,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(controller)
                 .environmentObject(historyStore)
                 .environmentObject(usageStore)
+                .environmentObject(generationStore)
             chatWindow = chromedWindow(title: "Orbit", size: NSSize(width: 960, height: 680), content: root)
         }
         NSApp.activate(ignoringOtherApps: true)

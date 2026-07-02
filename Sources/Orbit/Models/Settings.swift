@@ -72,6 +72,9 @@ enum Wire: String, Codable, Hashable, CaseIterable, Identifiable {
     // ASR (speech → text)
     case openAITranscription // POST {base}/audio/transcriptions (multipart, Whisper-style)
     case mimoAudioASR        // POST {base}/chat/completions (audio as input_audio content)
+    // Image (prompt → image)
+    case openAIImage         // POST {base}/images/generations (OpenAI 兼容)
+    case siliconflowImage    // POST {base}/images/generations (SiliconFlow 变体：image_size/batch_size)
 
     var id: String { rawValue }
 
@@ -80,6 +83,7 @@ enum Wire: String, Codable, Hashable, CaseIterable, Identifiable {
         switch self {
         case .openAIChat, .openAIResponses, .anthropicMessages: return .chat
         case .openAITranscription, .mimoAudioASR:               return .asr
+        case .openAIImage, .siliconflowImage:                   return .image
         }
     }
 
@@ -90,6 +94,8 @@ enum Wire: String, Codable, Hashable, CaseIterable, Identifiable {
         case .anthropicMessages:   return "Anthropic Messages"
         case .openAITranscription: return "OpenAI Transcription"
         case .mimoAudioASR:        return "MiMo 音频识别（Chat）"
+        case .openAIImage:         return "图像生成（OpenAI 兼容）"
+        case .siliconflowImage:    return "图像生成（SiliconFlow）"
         }
     }
 
@@ -101,6 +107,8 @@ enum Wire: String, Codable, Hashable, CaseIterable, Identifiable {
         case .anthropicMessages:   return "POST /v1/messages —— Claude 原生接口"
         case .openAITranscription: return "POST /audio/transcriptions —— 语音转写（multipart）"
         case .mimoAudioASR:        return "POST /chat/completions —— 音频内嵌 chat（input_audio）"
+        case .openAIImage:         return "POST /images/generations —— OpenAI 兼容图像"
+        case .siliconflowImage:    return "POST /images/generations —— SiliconFlow 图像变体"
         }
     }
 
@@ -112,6 +120,7 @@ enum Wire: String, Codable, Hashable, CaseIterable, Identifiable {
         case .anthropicMessages:   return "/v1/messages"
         case .openAITranscription: return "/audio/transcriptions"
         case .mimoAudioASR:        return "/chat/completions"
+        case .openAIImage, .siliconflowImage: return "/images/generations"
         }
     }
 
@@ -445,6 +454,8 @@ struct Settings: Codable {
     var hotkey: String
     var asrModelID: String?
     var llmModelID: String?
+    var imageModelID: String? = nil
+    var videoModelID: String? = nil
     var activeTemplateID: String?
     var llmPolishEnabled: Bool
     var autoInsert: Bool
@@ -537,6 +548,8 @@ struct Settings: Codable {
         hotkey = try c.decodeIfPresent(String.self, forKey: .hotkey) ?? d.hotkey
         asrModelID = try c.decodeIfPresent(String.self, forKey: .asrModelID)
         llmModelID = try c.decodeIfPresent(String.self, forKey: .llmModelID)
+        imageModelID = try c.decodeIfPresent(String.self, forKey: .imageModelID)
+        videoModelID = try c.decodeIfPresent(String.self, forKey: .videoModelID)
         activeTemplateID = try c.decodeIfPresent(String.self, forKey: .activeTemplateID)
         llmPolishEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmPolishEnabled) ?? d.llmPolishEnabled
         autoInsert = try c.decodeIfPresent(Bool.self, forKey: .autoInsert) ?? d.autoInsert
@@ -623,6 +636,28 @@ struct Settings: Codable {
 
     var asrModels: [ModelConfig] {
         models.filter { capability(of: $0) == .asr }
+    }
+
+    var imageModels: [ModelConfig] {
+        models.filter { capability(of: $0) == .image }
+    }
+
+    var videoModels: [ModelConfig] {
+        models.filter { capability(of: $0) == .video }
+    }
+
+    var imageModel: ModelConfig? {
+        guard let id = imageModelID,
+              let model = models.first(where: { $0.id == id }),
+              capability(of: model) == .image else { return nil }
+        return model
+    }
+
+    var videoModel: ModelConfig? {
+        guard let id = videoModelID,
+              let model = models.first(where: { $0.id == id }),
+              capability(of: model) == .video else { return nil }
+        return model
     }
 
     var asrModel: ModelConfig? {

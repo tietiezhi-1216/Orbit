@@ -41,6 +41,10 @@ struct ChatSidebarView: View {
                 chat.newConversation()
                 app.openChatWorkspace()
             }
+            SidebarItemRow(title: "创作", systemImage: "paintbrush",
+                           isSelected: app.workspace == .creation) {
+                app.openCreationWorkspace()
+            }
         }
     }
 

@@ -17,6 +17,8 @@ struct ChatRootView: View {
             switch app.workspace {
             case .chat:
                 ChatWorkspaceView(openSettings: openSettings)
+            case .creation:
+                CreationWorkspaceView(openSettings: openSettings)
             case .settings:
                 SettingsRootView()
             }

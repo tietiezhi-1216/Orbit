@@ -26,7 +26,7 @@ enum StatusBarIcon {
         let center = NSPoint(x: side / 2, y: side / 2)
         let ringRadius = 5.6 * scale
         let ringWidth = 2.4 * scale
-        let satelliteAngle: CGFloat = .pi / 4          // up-right, like the icns
+        let satelliteAngle: CGFloat = 0                // 正右侧（3 点钟方向）
         let satelliteOrbit = 6.6 * scale               // slightly outside the ring
         let satelliteRadius = 1.9 * scale
         let satelliteClearance = 3.2 * scale           // gap carved out of the ring

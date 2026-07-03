@@ -186,8 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "waveform.circle",
-                                   accessibilityDescription: "Orbit")
+            let icon = StatusBarIcon.make()
+            icon.accessibilityDescription = "Orbit"
+            button.image = icon
         }
         let menu = NSMenu()
         menu.addItem(withTitle: "打开 Orbit", action: #selector(openChat(_:)), keyEquivalent: "")

@@ -67,8 +67,13 @@ assemble() {
     cp "$bin/$APP_NAME" "$app/Contents/MacOS/$APP_NAME"
     cp "Info.plist" "$app/Contents/Info.plist"
     cp "Assets/Brand/Orbit.icns" "$app/Contents/Resources/Orbit.icns"
-    # SwiftPM resource bundles (e.g. Highlightr's highlight.js) must live in the
-    # app's Resources so Bundle.module resource lookup works at runtime.
+    # SwiftPM resource bundles land in Contents/Resources (the codesign-legal
+    # location). CAVEAT: SwiftPM's generated `Bundle.module` accessor looks for
+    # them at `Bundle.main.bundleURL/<pkg>.bundle` (the .app ROOT) or a hardcoded
+    # build-machine path — NOT here — so any package that reads resources via
+    # `Bundle.module` (e.g. Highlightr) fatalErrors at runtime on a signed .app
+    # off the build host. Don't rely on Bundle.module resources for shipped code;
+    # see Sources/Orbit/UI/MarkdownRendering.swift. These copies are harmless.
     for b in "$bin"/*.bundle; do
         [ -e "$b" ] && cp -R "$b" "$app/Contents/Resources/"
     done

@@ -1,21 +1,29 @@
 //  MarkdownRendering.swift
 //  Renders assistant replies with MarkdownUI (mainstream SwiftUI Markdown: code
-//  blocks, tables, lists, GFM) and highlights code blocks with Highlightr
-//  (highlight.js — 180+ languages). The Highlightr theme follows light/dark.
+//  blocks, tables, lists, GFM). Code blocks get a header (language + copy) and a
+//  bordered, scrollable body.
+//
+//  NOTE: syntax coloring (Highlightr / highlight.js) is intentionally NOT wired
+//  here. Highlightr loads its highlight.js via SwiftPM's generated `Bundle.module`
+//  accessor, which resolves resources at `Bundle.main.bundleURL/<pkg>.bundle`
+//  (the .app ROOT) or a hardcoded build-machine path — neither of which exists in
+//  a signed/notarized .app assembled by build.sh (code signing forbids anything
+//  but `Contents/` at the bundle root). Instantiating `Highlightr()` therefore
+//  hits an uncatchable `fatalError` at runtime on any machine other than the build
+//  host (it crashed 0.0.6 on launch the first time chat rendered a code block).
+//  Code renders as clean monospaced text until highlighting is restored through a
+//  resource path that survives signing.
 
 import SwiftUI
 import AppKit
 import MarkdownUI
-import Highlightr
 
-/// A chat Markdown block with syntax-highlighted, bordered, copyable code blocks.
+/// A chat Markdown block with bordered, copyable code blocks.
 struct ChatMarkdown: View {
     let content: String
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Markdown(content)
-            .markdownCodeSyntaxHighlighter(.highlightr(dark: colorScheme == .dark))
             .markdownBlockStyle(\.codeBlock) { configuration in
                 CodeBlock(configuration: configuration)
             }
@@ -51,6 +59,7 @@ private struct CodeBlock: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 configuration.label
+                    .font(.system(.callout, design: .monospaced))
                     .padding(10)
             }
         }
@@ -67,42 +76,5 @@ private struct CodeBlock: View {
         pb.setString(configuration.content, forType: .string)
         copied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-    }
-}
-
-// MARK: - Highlightr → MarkdownUI adapter
-
-struct HighlightrSyntaxHighlighter: CodeSyntaxHighlighter {
-    let theme: String
-
-    // Highlightr loads highlight.js through JavaScriptCore, so instances are
-    // reused per theme rather than rebuilt on every code block.
-    private static var cache: [String: Highlightr] = [:]
-
-    private func highlighter() -> Highlightr? {
-        if let existing = Self.cache[theme] { return existing }
-        let created = Highlightr()
-        created?.setTheme(to: theme)
-        Self.cache[theme] = created
-        return created
-    }
-
-    func highlightCode(_ code: String, language: String?) -> Text {
-        guard let hl = highlighter(),
-              let attributed = hl.highlight(code, as: normalize(language), fastRender: true)
-        else { return Text(code) }
-        return Text(AttributedString(attributed))
-    }
-
-    /// highlight.js uses lowercase language ids; nil lets it auto-detect.
-    private func normalize(_ language: String?) -> String? {
-        guard let l = language?.trimmingCharacters(in: .whitespaces).lowercased(), !l.isEmpty else { return nil }
-        return l
-    }
-}
-
-extension CodeSyntaxHighlighter where Self == HighlightrSyntaxHighlighter {
-    static func highlightr(dark: Bool) -> Self {
-        HighlightrSyntaxHighlighter(theme: dark ? "atom-one-dark" : "atom-one-light")
     }
 }

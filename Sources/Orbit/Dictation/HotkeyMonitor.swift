@@ -87,7 +87,7 @@ final class HotkeyMonitor {
             ("pin", capture.pinChord.keyCode, capture.pinChord.modifiers),
         ].filter { !$0.2.isEmpty }
         shortcutsLock.unlock()
-        NSLog("[capture] 已加载功能热键: 截图=\(capture.captureChord.display) 贴图=\(capture.pinChord.display)")
+        CaptureLog.log("已加载功能热键: 截图=\(capture.captureChord.display) 贴图=\(capture.pinChord.display)")
     }
 
     /// Pause / resume chord matching — used while the settings recorder is
@@ -152,10 +152,11 @@ final class HotkeyMonitor {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             NSLog("[hotkey] 无法安装全局事件监听 — 请在「系统设置 → 隐私与安全性 → 辅助功能」授权 Orbit，然后重启应用。")
+            CaptureLog.log("❌ 全局事件 tap 安装失败——辅助功能权限未生效，热键（截图/贴图/听写）都不工作")
             DispatchQueue.main.async { [weak self] in self?.onInstallResult?(false) }
             return
         }
-        NSLog("[hotkey] 事件监听已安装（active tap, 依赖辅助功能）")
+        CaptureLog.log("✅ 全局事件 tap 已安装（active tap, 依赖辅助功能）")
 
         self.tap = tap
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)

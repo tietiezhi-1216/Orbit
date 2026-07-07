@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onStartCapture = { [weak self] in self?.captureEngine.startRegionCapture() }
         controller.onPinClipboard = { [weak self] in self?.captureEngine.pinClipboard() }
         controller.onPinImage = { [weak self] image in self?.captureEngine.pin(image: image) }
+        captureEngine.logStartupDiagnostic()
 
         installMainMenu()
         setupStatusItem()
@@ -87,8 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Accessibility — NOT the microphone. Start it as soon as Accessibility is
         // granted, independent of the mic/onboarding flow, so a user who only
         // wants screenshots (and declines the mic) still gets working ⌃⇧A / ⌃⇧P.
+        CaptureLog.log("启动：辅助功能=\(controller.axPermission == .granted ? "已授权" : "未授权") 麦克风=\(controller.micPermission == .granted ? "已授权" : "未授权") 屏幕录制=\(controller.screenRecordingPermission == .granted ? "已授权" : "未授权")")
         if controller.axPermission == .granted {
             startHotkeyMonitor()
+        } else {
+            CaptureLog.log("辅助功能未授权 → 未启动全局热键监听（截图/贴图/听写热键都不会工作）")
         }
         if controller.requiredPermissionsGranted {
             // Mic + accessibility in place → go straight to chat.
@@ -138,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.onShortcut = { shortcut in ShortcutRunner.run(shortcut) }
         // Built-in feature chords: 区域截图 / 剪贴板贴图.
         monitor.onFeatureChord = { [weak self] feature in
-            NSLog("[capture] 功能热键触发: \(feature)")
+            CaptureLog.log("功能热键触发: \(feature)")
             switch feature {
             case "capture": self?.captureEngine.startRegionCapture()
             case "pin":     self?.captureEngine.pinClipboard()

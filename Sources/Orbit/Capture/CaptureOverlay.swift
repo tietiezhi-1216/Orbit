@@ -160,7 +160,7 @@ final class CaptureOverlayController {
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
         panel.makeKey()
-        NSLog("[capture] overlay shown on screen \(screen.frame) — panel visible=\(panel.isVisible) key=\(panel.isKeyWindow)")
+        CaptureLog.log("遮罩已显示 screen=\(screen.frame) visible=\(panel.isVisible) key=\(panel.isKeyWindow)")
         NSCursor.crosshair.push()
         installKeyMonitor()
     }

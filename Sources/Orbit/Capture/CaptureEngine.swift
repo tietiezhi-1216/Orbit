@@ -6,6 +6,7 @@
 
 import AppKit
 import SwiftUI
+import ScreenCaptureKit
 
 @MainActor
 final class CaptureEngine {
@@ -27,6 +28,30 @@ final class CaptureEngine {
 
     var isCapturing: Bool { overlay != nil }
 
+    /// One-shot startup probe: which binary is running, and can it actually reach
+    /// ScreenCaptureKit? Written to ~/.orbit/capture-debug.log so "granted but
+    /// still says not granted" can be diagnosed without guessing — the log tells
+    /// us the exact bundle id / path (dev vs release) and whether SCShareableContent
+    /// really succeeds for THIS process.
+    func logStartupDiagnostic() {
+        let id = Bundle.main.bundleIdentifier ?? "?"
+        let path = Bundle.main.bundlePath
+        let preflight = CGPreflightScreenCaptureAccess()
+        CaptureLog.log("——— 启动自检 ———")
+        CaptureLog.log("运行的 App: \(id)  路径: \(path)")
+        CaptureLog.log("CGPreflightScreenCaptureAccess = \(preflight)")
+        Task { @MainActor in
+            do {
+                let content = try await withCaptureTimeout(seconds: 6) {
+                    try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                }
+                CaptureLog.log("✅ SCShareableContent 成功：\(content.displays.count) 个显示器、\(content.windows.count) 个窗口——屏幕录制对本 App 有效")
+            } catch {
+                CaptureLog.log("❌ SCShareableContent 失败：\(error.localizedDescription)——屏幕录制对本 App【无效】。请确认在系统设置里授权的是这个 App（\(id)）本身，且授权后已完全退出并重开。")
+            }
+        }
+    }
+
     // MARK: - Entry points
 
     /// 区域截图: freeze the screen under the mouse and open the overlay.
@@ -35,22 +60,22 @@ final class CaptureEngine {
     /// our self-signed dev identity (same macOS quirk as Input Monitoring, see
     /// AppController), so gating on it up front can lock out a granted app.
     func startRegionCapture() {
-        NSLog("[capture] startRegionCapture 被调用 (overlay=\(overlay != nil) starting=\(starting))")
+        CaptureLog.log("startRegionCapture 被调用 (overlay=\(overlay != nil) starting=\(starting) 屏幕录制=\(Permissions.screenRecording == .granted ? "已授权" : "未授权"))")
         guard overlay == nil, !starting else {
-            NSLog("[capture] 提前返回：已有 overlay 或正在启动")
+            CaptureLog.log("提前返回：已有 overlay 或正在启动")
             return
         }
 
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
             ?? NSScreen.main
-        guard let screen else { NSLog("[capture] 找不到目标屏幕"); return }
+        guard let screen else { CaptureLog.log("找不到目标屏幕"); return }
 
         starting = true
         Task { @MainActor in
             defer { starting = false }
             do {
-                NSLog("[capture] 开始冻结屏幕…")
+                CaptureLog.log("开始冻结屏幕…")
                 // Hard timeout: SCScreenshotManager can wedge when the screen-
                 // recording grant is half-applied. Without this, `starting` (reset
                 // only by the defer below) would stay true forever and every later
@@ -58,10 +83,10 @@ final class CaptureEngine {
                 let frozen = try await withCaptureTimeout(seconds: 6) {
                     try await ScreenCapturer.freeze(screen: screen)
                 }
-                NSLog("[capture] 冻结成功 (\(frozen.width)x\(frozen.height))，展示遮罩")
+                CaptureLog.log("冻结成功 (\(frozen.width)x\(frozen.height))，展示遮罩")
                 presentOverlay(frozen: frozen, screen: screen)
             } catch {
-                NSLog("[capture] freeze failed: \(error.localizedDescription) (preflight=\(Permissions.screenRecording == .granted))")
+                CaptureLog.log("❌ 冻结失败: \(error.localizedDescription) (屏幕录制=\(Permissions.screenRecording == .granted ? "已授权" : "未授权"))")
                 // SCShareableContent throws when the TCC grant is missing (or
                 // hasn't taken effect in this launch) — that's the permission
                 // path; anything else is a real capture failure.

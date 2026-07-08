@@ -269,6 +269,32 @@ final class CaptureSessionModel: ObservableObject {
         }
     }
 
+    /// Right-click inside the region: draw a rectangle snapped to the smallest UI
+    /// element under `p` (view coords) — 「框选当前节点」. Falls back to a toast when
+    /// no accessibility element is found there.
+    func boxElement(at p: CGPoint) {
+        guard let sel = selection, !transformed else { return }
+        let node = axNodes
+            .filter { $0.frame.contains(p) }
+            .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        guard let node else {
+            showToast("光标处未识别到元素")
+            return
+        }
+        let local = CGRect(x: node.frame.minX - sel.minX, y: node.frame.minY - sel.minY,
+                           width: node.frame.width, height: node.frame.height)
+            .intersection(CGRect(origin: .zero, size: sel.size))
+        guard local.width > 3, local.height > 3 else { return }
+        editor.snapshot()
+        let a = Annotation(kind: .rect, start: local.origin,
+                           end: CGPoint(x: local.maxX, y: local.maxY),
+                           color: editor.color, colorHex: editor.colorHex,
+                           lineWidth: editor.lineWidth, filled: false,
+                           dash: editor.dash, cornerRadius: editor.cornerRadius)
+        editor.add(a)
+        editor.selectedID = a.id
+    }
+
     func showToast(_ text: String) {
         toast = text
         toastTask?.cancel()
@@ -440,13 +466,14 @@ final class CaptureSessionModel: ObservableObject {
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
-    /// Right-click hook (return true = swallow). Intercepted in `sendEvent` — the
-    /// mandatory dispatch path for every event routed to this window — because a
-    /// local event monitor proved unreliable for right-clicks on this panel.
-    var onRightMouseDown: (() -> Bool)?
+    /// Right-click hook (return true = swallow), given the click point in WINDOW
+    /// coords (bottom-left origin). Intercepted in `sendEvent` — the mandatory
+    /// dispatch path for every event routed to this window — because a local event
+    /// monitor proved unreliable for right-clicks on this panel.
+    var onRightMouseDown: ((NSPoint) -> Bool)?
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .rightMouseDown, onRightMouseDown?() == true { return }
+        if event.type == .rightMouseDown, onRightMouseDown?(event.locationInWindow) == true { return }
         super.sendEvent(event)
     }
 }
@@ -482,31 +509,29 @@ final class CaptureOverlayController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = hosting
         panel.setFrame(screen.frame, display: true)
-        // Layered right-click:
-        //  · editing + a draw/erase tool active → drop that tool back to select
-        //    (stays in the region — does NOT return to re-framing);
-        //  · editing + select tool → back to re-select the region (marks kept);
-        //  · selecting → grab the element/window under the cursor (Esc cancels).
-        panel.onRightMouseDown = { [weak self] in
+        // Position-aware right-click:
+        //  · editing + INSIDE the region → box the UI element under the cursor
+        //    (框选当前节点：加一个贴合该元素的矩形标注);
+        //  · editing + OUTSIDE the region → cancel this region, back to selecting
+        //    (marks kept); a further right-click there then cancels the capture;
+        //  · selecting (no region) → cancel the capture entirely.
+        panel.onRightMouseDown = { [weak self] locWin in
             guard let self else { return false }
             let s = self.session
+            // Window coords (bottom-left origin) → overlay view coords (top-left).
+            let p = CGPoint(x: locWin.x, y: s.canvasSize.height - locWin.y)
             switch s.phase {
             case .editing:
-                if s.editor.tool != .select {
-                    CaptureLog.log("右键 → 退出当前工具，回到选择模式")
-                    s.editor.tool = .select
-                    s.editor.selectedID = nil
+                if let sel = s.selection, sel.contains(p) {
+                    CaptureLog.log("右键（区域内 \(Int(p.x)),\(Int(p.y))）→ 框选光标处节点")
+                    s.boxElement(at: p)
                 } else {
-                    CaptureLog.log("右键 → 返回重新框选（保留标注）")
+                    CaptureLog.log("右键（区域外）→ 取消该截图区域，回到框选")
                     s.restartSelection()
                 }
             case .selecting:
-                if let target = s.hoverElement ?? s.hoverWindow {
-                    CaptureLog.log("右键 → 框选光标处节点")
-                    s.beginEditing(target, source: s.hoverElement != nil ? "element" : "window")
-                } else {
-                    CaptureLog.log("右键 → 光标处无可选节点，忽略")
-                }
+                CaptureLog.log("右键（框选阶段）→ 取消截图")
+                s.onCancel?()
             }
             return true
         }
@@ -1545,7 +1570,7 @@ private struct PropertyBar: View {
     }
 
     private var widthSection: some View {
-        scrub("线宽", get: { editor.lineWidth }, set: { editor.setLineWidth($0) }, range: 1...20)
+        scrub("线宽", get: { editor.lineWidth }, set: { editor.setLineWidth($0) }, range: 1...40)
     }
 
     /// Arrows also expose the head style + a head-size scrub (箭头类型 / 箭头粗细).
@@ -1559,7 +1584,9 @@ private struct PropertyBar: View {
                 }
             }
             scrub("箭头", get: { editor.arrowHeadScale }, set: { editor.setArrowHeadScale($0) },
-                  range: 0.5...2.5, step: 0.1, format: { String(format: "%.1f×", $0) })
+                  range: 0.4...4.0, step: 0.1, format: { String(format: "%.1f×", $0) })
+            scrub("弯度", get: { editor.arrowCurvature }, set: { editor.setArrowCurvature($0) },
+                  range: -0.6...0.6, step: 0.05, format: { String(format: "%.2f", $0) })
         }
     }
 

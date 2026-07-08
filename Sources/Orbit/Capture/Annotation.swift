@@ -273,6 +273,30 @@ struct Annotation: Identifiable, Codable, Hashable {
         control ?? CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
     }
 
+    /// Signed curvature (弯度): the control point's perpendicular offset from the
+    /// chord midpoint, as a fraction of the chord length. 0 = straight; ± bends to
+    /// either side. Scale-invariant so it survives resize, and drives an explicit
+    /// slider in addition to dragging the bend handle.
+    var curvature: CGFloat {
+        get {
+            let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+            let c = control ?? mid
+            let dx = end.x - start.x, dy = end.y - start.y
+            let len = max(hypot(dx, dy), 0.001)
+            let px = -dy / len, py = dx / len            // perpendicular unit vector
+            return ((c.x - mid.x) * px + (c.y - mid.y) * py) / len
+        }
+        set {
+            let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+            let dx = end.x - start.x, dy = end.y - start.y
+            let len = max(hypot(dx, dy), 0.001)
+            let px = -dy / len, py = dx / len
+            control = abs(newValue) < 0.001
+                ? nil
+                : CGPoint(x: mid.x + px * newValue * len, y: mid.y + py * newValue * len)
+        }
+    }
+
     /// Normalized rect spanned by start/end.
     var rect: CGRect {
         CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
@@ -400,6 +424,8 @@ final class AnnotationEditorState: ObservableObject {
     @Published var arrowType: ArrowType = .filled
     /// Arrow head size multiplier new arrows get.
     @Published var arrowHeadScale: CGFloat = 1
+    /// Curvature (弯度) new arrows get (0 = straight).
+    @Published var arrowCurvature: CGFloat = 0
     /// Font family new text / watermark get (nil = system font).
     @Published var fontFamily: String?
     /// Magnifier zoom new lenses get.
@@ -476,6 +502,11 @@ final class AnnotationEditorState: ObservableObject {
     func setArrowHeadScale(_ s: CGFloat) {
         arrowHeadScale = s
         if let id = selectedID { update(id: id) { $0.arrowHeadScale = s } }
+    }
+
+    func setArrowCurvature(_ c: CGFloat) {
+        arrowCurvature = c
+        if let id = selectedID { update(id: id) { $0.curvature = c } }
     }
 
     func setFontFamily(_ family: String?) {

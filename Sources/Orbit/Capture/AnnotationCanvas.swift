@@ -211,10 +211,11 @@ enum AnnotationRenderer {
         let total = arc[steps]
         guard total > 0.5 else { return Path() }
 
-        // Head eats the last stretch of the curve; shaft fills the rest.
-        let headLen = min(max(13, lineWidth * 3.4) * headScale, total * 0.72)
-        let fullWidth = max(lineWidth * 1.5, 3)          // shaft thickness at the base
-        let headHalf = max(headLen * 0.46, fullWidth * 1.55)
+        // Head eats the last stretch of the curve; shaft fills the rest. Bolder,
+        // larger proportions than a hairline arrow — reads clearly on a screenshot.
+        let headLen = min(max(18, lineWidth * 4.4) * headScale, total * 0.72)
+        let fullWidth = max(lineWidth * 2.6, 6)          // shaft thickness at the base
+        let headHalf = max(headLen * 0.52, fullWidth * 1.3)
 
         // Index where the head begins (remaining length ≈ headLen).
         var baseIdx = steps
@@ -268,8 +269,8 @@ enum AnnotationRenderer {
         let total = arc[steps]
         guard total > 0.5 else { return (Path(), Path()) }
 
-        let headLen = min(max(14, lineWidth * 3.8) * headScale, total * 0.85)
-        let headHalf = headLen * 0.55
+        let headLen = min(max(18, lineWidth * 4.8) * headScale, total * 0.85)
+        let headHalf = headLen * 0.6
 
         var baseIdx = steps
         for i in 0...steps where total - arc[i] <= headLen { baseIdx = i; break }
@@ -658,7 +659,8 @@ struct AnnotationCanvasView: View {
                 }
                 return
             }
-            if let a = draft, moved {
+            if var a = draft, moved {
+                if a.kind == .arrow, editor.arrowCurvature != 0 { a.curvature = editor.arrowCurvature }
                 editor.snapshot()
                 editor.add(a)
                 editor.selectedID = a.id

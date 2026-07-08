@@ -1,12 +1,15 @@
-name: CI
+name: CI (macOS)
 
 # 每次推到 main / 提 PR 都在 GitHub 托管的 macOS runner 上构建并组装 .app，
 # 验证整套 build.sh release 流程能跑通（CI 上没有自签证书，会自动回落到 ad-hoc 签名）。
+# macOS 应用自「平台拆分」后位于 apple/；只在触及 macOS 相关文件时才跑。
 on:
   push:
     branches: [main]
+    paths: ['apple/**', '.github/workflows/ci.yml']
   pull_request:
     branches: [main]
+    paths: ['apple/**', '.github/workflows/ci.yml']
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +20,9 @@ jobs:
   build:
     name: Build (macOS · release)
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apple      # macOS app lives under apple/ since the platform split
     steps:
       - uses: actions/checkout@v4
 

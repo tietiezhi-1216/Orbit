@@ -9,11 +9,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **坚持主流技术栈**——SwiftUI 为主，必要时用薄 AppKit 桥接（菜单栏、悬浮面板、事件监听）。不引入小众框架。
 4. **优先用主流、常见的方案解决问题**——能用系统框架（AVFoundation / URLSession / Combine）就不要自造轮子；新增能力先看是否能复用现有抽象（见下方「配置数据模型」）。
 
-## 常用命令
+## 仓库结构（平台拆分，2026-07 起）
 
-本项目是 **Swift Package（无 Xcode 工程）**，只装了 Command Line Tools 即可构建。所有命令在仓库根目录执行：
+仓库按平台分目录：
+
+- **`apple/`** —— macOS 原生应用（Swift Package + `build.sh`；本文件绝大部分讲的是它）。
+- **`windows/`** —— Windows 应用（Avalonia / .NET / C#，与 macOS 对齐的第二实现，开发中）。
+- **`shared/`** —— 跨端对齐的规格（模型配置 schema、协议 Wire 定义等，单一事实源）。
+- 根目录留 `docs/`、`.github/`、`README`、`LICENSE`、本文件。
+
+## 常用命令（macOS，在 `apple/` 下执行）
+
+macOS 应用是 **Swift Package（无 Xcode 工程）**，只装了 Command Line Tools 即可构建。所有命令在 **`apple/`** 目录执行：
 
 ```bash
+cd apple
 ./build.sh run        # 编译 → 组装 → Apple Development 签名 → 装到 /Applications/Orbit Dev.app → 启动（最常用）
 ./build.sh build      # 仅编译并组装 debug 版 .app（留在 .build/，不安装）
 ./build.sh release    # release 配置组装

@@ -31,6 +31,9 @@ jobs:
       # 一处判断是否具备签名条件，后续步骤据此 gate。
       SIGNING_AVAILABLE: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
       NOTARIZE_AVAILABLE: ${{ secrets.MACOS_NOTARY_PASSWORD != '' }}
+    defaults:
+      run:
+        working-directory: apple      # macOS app lives under apple/ since the platform split
     steps:
       - uses: actions/checkout@v4
 
@@ -172,7 +175,9 @@ jobs:
           name: Orbit ${{ steps.ver.outputs.version }}
           body_path: .github/RELEASE_NOTES.md
           prerelease: true
+          # Artifacts are produced under apple/ (job working-directory); action-gh-release
+          # resolves file globs from the workspace ROOT, so prefix them explicitly.
           files: |
-            ${{ steps.pkg.outputs.dmg }}
-            ${{ steps.pkg.outputs.dmg }}.sha256
-            ${{ steps.manifest.outputs.manifest }}
+            apple/${{ steps.pkg.outputs.dmg }}
+            apple/${{ steps.pkg.outputs.dmg }}.sha256
+            apple/${{ steps.manifest.outputs.manifest }}

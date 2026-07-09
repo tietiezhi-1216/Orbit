@@ -1,0 +1,156 @@
+name: Release (All platforms · Flutter)
+
+# 一次构建全部目标端并把产物挂到同一个 GitHub Release：
+#   Windows / macOS / Linux / Android(APK) / Web / iOS(未签名)
+# 用 v* 标签触发（Flutter 是全端主线）；旧的 Swift macOS 发布走 apple-v*，互不影响。
+# 无签名证书 → 桌面产物未签名（Win 弹 SmartScreen / macOS 需右键打开），iOS 未签名不可直接安装。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 0.3.0-alpha.2）'
+        required: true
+        default: '0.3.0-alpha.2'
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: 3.44.5
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V"    >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app, shell: pwsh } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "$env:GITHUB_WORKSPACE/Orbit-Windows-$env:VER-x64.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: Orbit-Windows-*-x64.zip, if-no-files-found: error }
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: ditto -c -k --keepParent build/macos/Build/Products/Release/orbit.app "$GITHUB_WORKSPACE/Orbit-macOS-$VER.zip"
+      - uses: actions/upload-artifact@v4
+        with: { name: macos, path: Orbit-macOS-*.zip, if-no-files-found: error }
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - run: tar czf "$GITHUB_WORKSPACE/Orbit-Linux-$VER-x64.tar.gz" -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with: { name: linux, path: Orbit-Linux-*-x64.tar.gz, if-no-files-found: error }
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/Orbit-Android-$VER.apk"
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: Orbit-Android-*.apk, if-no-files-found: error }
+
+  web:
+    needs: version
+    runs-on: ubuntu-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build web --release
+      - run: (cd build/web && zip -qr "$GITHUB_WORKSPACE/Orbit-Web-$VER.zip" .)
+      - uses: actions/upload-artifact@v4
+        with: { name: web, path: Orbit-Web-*.zip, if-no-files-found: error }
+
+  ios:
+    needs: version
+    runs-on: macos-latest
+    env: { VER: "${{ needs.version.outputs.version }}" }
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: "${{ env.FLUTTER_VERSION }}", channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - run: ditto -c -k --keepParent build/ios/iphoneos/Runner.app "$GITHUB_WORKSPACE/Orbit-iOS-$VER-unsigned.zip"
+      - uses: actions/upload-artifact@v4
+        with: { name: ios, path: Orbit-iOS-*-unsigned.zip, if-no-files-found: error }
+
+  publish:
+    needs: [version, windows, macos, linux, android, web, ios]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: ls -la dist || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Orbit ${{ needs.version.outputs.version }}
+          prerelease: true
+          body: |
+            Orbit 全端预览（Flutter 重构中）——当前含 **聊天 + 模型/渠道配置**；语音胶囊 / 截图卫星 陆续补齐。
+            - **Windows**：解压跑 `orbit.exe`（未签名，SmartScreen 点「仍要运行」）
+            - **macOS**：解压后右键「打开」（未签名/未公证；或 `xattr -cr orbit.app`）
+            - **Linux**：解压 tar，运行 `orbit`（需 GTK3）
+            - **Android**：安装 APK（调试签名，仅供测试）
+            - **Web**：解压后静态托管（如 `python3 -m http.server`）
+            - **iOS**：未签名，需自行签名后安装（仅证明可编译）
+          files: dist/*

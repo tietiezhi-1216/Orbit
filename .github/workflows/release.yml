@@ -12,8 +12,9 @@ name: Release
 #   MACOS_NOTARY_TEAM_ID    团队 ID（如 LQ97GA8LY8）
 # 详见 docs/RELEASE_SIGNING.md。
 on:
+  # 旧的 Swift macOS 版（apple/），Flutter 全端主线用 v* 后，这里改用 apple-v* 触发以解耦。
   push:
-    tags: ['v*']
+    tags: ['apple-v*']
   workflow_dispatch:
     inputs:
       version:
@@ -47,7 +48,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             V="${{ github.event.inputs.version }}"
           else
-            V="${GITHUB_REF_NAME#v}"
+            V="${GITHUB_REF_NAME#apple-v}"
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=v$V"   >> "$GITHUB_OUTPUT"

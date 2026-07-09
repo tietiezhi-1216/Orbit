@@ -6,14 +6,14 @@ import 'theme.dart';
 
 /// The single-window shell: a slim left rail (chat / settings) beside the content,
 /// mirroring the macOS app's single-window dual-workspace.
-class OrbitShell extends StatefulWidget {
-  const OrbitShell({super.key});
+class TietiezhiShell extends StatefulWidget {
+  const TietiezhiShell({super.key});
 
   @override
-  State<OrbitShell> createState() => _OrbitShellState();
+  State<TietiezhiShell> createState() => _TietiezhiShellState();
 }
 
-class _OrbitShellState extends State<OrbitShell> {
+class _TietiezhiShellState extends State<TietiezhiShell> {
   int _index = 0; // 0 = chat, 1 = settings
 
   @override
@@ -44,8 +44,8 @@ class _Rail extends StatelessWidget {
     return Container(
       width: 60,
       decoration: const BoxDecoration(
-        color: OrbitColors.panel,
-        border: Border(right: BorderSide(color: OrbitColors.border)),
+        color: TietiezhiColors.panel,
+        border: Border(right: BorderSide(color: TietiezhiColors.border)),
       ),
       child: Column(
         children: [
@@ -56,7 +56,7 @@ class _Rail extends StatelessWidget {
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                colors: [OrbitColors.accent, OrbitColors.accent2],
+                colors: [TietiezhiColors.accent, TietiezhiColors.accent2],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -98,7 +98,7 @@ class _RailButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: Material(
-        color: active ? OrbitColors.panelAlt : Colors.transparent,
+        color: active ? TietiezhiColors.panelAlt : Colors.transparent,
         borderRadius: BorderRadius.circular(9),
         child: InkWell(
           borderRadius: BorderRadius.circular(9),
@@ -111,12 +111,12 @@ class _RailButton extends StatelessWidget {
               children: [
                 Icon(icon,
                     size: 18,
-                    color: active ? OrbitColors.text : OrbitColors.textDim),
+                    color: active ? TietiezhiColors.text : TietiezhiColors.textDim),
                 const SizedBox(height: 2),
                 Text(label,
                     style: TextStyle(
                         fontSize: 10,
-                        color: active ? OrbitColors.text : OrbitColors.textDim)),
+                        color: active ? TietiezhiColors.text : TietiezhiColors.textDim)),
               ],
             ),
           ),

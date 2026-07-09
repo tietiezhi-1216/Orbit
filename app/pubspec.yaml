@@ -1,5 +1,5 @@
-name: orbit
-description: "A new Flutter project."
+name: tietiezhi
+description: "Tietiezhi（铁铁汁）——万物互联的多模态 AI 客户端，连接你的所有设备与模型。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

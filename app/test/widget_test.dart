@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:orbit/core/models.dart';
+import 'package:tietiezhi/core/models.dart';
 
 void main() {
   test('resolved model builds the endpoint URL from provider + wire', () {

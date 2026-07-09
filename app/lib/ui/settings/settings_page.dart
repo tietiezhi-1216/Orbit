@@ -115,7 +115,7 @@ class _SettingsPageState extends State<SettingsPage> {
           selected: _section,
           onSelect: (s) => setState(() => _section = s),
         ),
-        const VerticalDivider(width: 1, color: OrbitColors.border),
+        const VerticalDivider(width: 1, color: TietiezhiColors.border),
         Expanded(child: _detail(_section)),
       ],
     );
@@ -158,7 +158,7 @@ class _SettingsSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 190,
-      color: OrbitColors.panel,
+      color: TietiezhiColors.panel,
       child: ListView(
         padding: const EdgeInsets.symmetric(vertical: 12),
         children: [
@@ -166,7 +166,7 @@ class _SettingsSidebar extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 4, 16, 10),
             child: Text('设置',
                 style: TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w700, color: OrbitColors.text)),
+                    fontSize: 16, fontWeight: FontWeight.w700, color: TietiezhiColors.text)),
           ),
           for (final group in SettingsGroup.values) ...[
             Padding(
@@ -176,7 +176,7 @@ class _SettingsSidebar extends StatelessWidget {
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.5,
-                      color: OrbitColors.textDim)),
+                      color: TietiezhiColors.textDim)),
             ),
             for (final s in SettingsSection.values.where((s) => s.group == group))
               _SectionTile(
@@ -202,7 +202,7 @@ class _SectionTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Material(
-        color: active ? OrbitColors.panelAlt : Colors.transparent,
+        color: active ? TietiezhiColors.panelAlt : Colors.transparent,
         borderRadius: BorderRadius.circular(7),
         child: InkWell(
           borderRadius: BorderRadius.circular(7),
@@ -212,12 +212,12 @@ class _SectionTile extends StatelessWidget {
             child: Row(
               children: [
                 Icon(section.icon,
-                    size: 16, color: active ? OrbitColors.accent : OrbitColors.textDim),
+                    size: 16, color: active ? TietiezhiColors.accent : TietiezhiColors.textDim),
                 const SizedBox(width: 8),
                 Text(section.title,
                     style: TextStyle(
                         fontSize: 13,
-                        color: active ? OrbitColors.text : OrbitColors.textDim)),
+                        color: active ? TietiezhiColors.text : TietiezhiColors.textDim)),
               ],
             ),
           ),

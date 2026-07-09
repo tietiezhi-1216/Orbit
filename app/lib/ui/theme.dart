@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Orbit brand palette (dark, matches the macOS app's overlay chrome).
-class OrbitColors {
+/// Tietiezhi brand palette (dark, matches the macOS app's overlay chrome).
+class TietiezhiColors {
   static const accent = Color(0xFF6E7BF2);
   static const accent2 = Color(0xFFB266F2);
   static const bg = Color(0xFF141418);
@@ -12,38 +12,38 @@ class OrbitColors {
   static const textDim = Color(0xFF9A9AA6);
 }
 
-ThemeData orbitTheme() {
+ThemeData tietiezhiTheme() {
   final base = ThemeData(
     brightness: Brightness.dark,
     useMaterial3: true,
-    scaffoldBackgroundColor: OrbitColors.bg,
+    scaffoldBackgroundColor: TietiezhiColors.bg,
     colorScheme: const ColorScheme.dark(
-      primary: OrbitColors.accent,
-      secondary: OrbitColors.accent2,
-      surface: OrbitColors.panel,
-      onSurface: OrbitColors.text,
+      primary: TietiezhiColors.accent,
+      secondary: TietiezhiColors.accent2,
+      surface: TietiezhiColors.panel,
+      onSurface: TietiezhiColors.text,
     ),
   );
   return base.copyWith(
     textTheme: base.textTheme.apply(
-      bodyColor: OrbitColors.text,
-      displayColor: OrbitColors.text,
+      bodyColor: TietiezhiColors.text,
+      displayColor: TietiezhiColors.text,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: OrbitColors.panel,
+      fillColor: TietiezhiColors.panel,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: OrbitColors.border),
+        borderSide: const BorderSide(color: TietiezhiColors.border),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: OrbitColors.border),
+        borderSide: const BorderSide(color: TietiezhiColors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: OrbitColors.accent, width: 1.5),
+        borderSide: const BorderSide(color: TietiezhiColors.accent, width: 1.5),
       ),
     ),
   );

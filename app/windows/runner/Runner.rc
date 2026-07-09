@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.orbit" "\0"
-            VALUE "FileDescription", "orbit" "\0"
+            VALUE "CompanyName", "com.tietiezhi" "\0"
+            VALUE "FileDescription", "Tietiezhi" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "orbit" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.orbit. All rights reserved." "\0"
-            VALUE "OriginalFilename", "orbit.exe" "\0"
-            VALUE "ProductName", "orbit" "\0"
+            VALUE "InternalName", "Tietiezhi" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.tietiezhi. All rights reserved." "\0"
+            VALUE "OriginalFilename", "Tietiezhi.exe" "\0"
+            VALUE "ProductName", "Tietiezhi" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

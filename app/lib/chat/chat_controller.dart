@@ -8,7 +8,7 @@ class ChatUiMessage {
   String text;
   ChatUiMessage(this.role, this.text);
   bool get isUser => role == 'user';
-  String get roleLabel => isUser ? '你' : 'Orbit';
+  String get roleLabel => isUser ? '你' : 'Tietiezhi';
 }
 
 class ChatController extends ChangeNotifier {

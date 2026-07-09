@@ -1,4 +1,4 @@
-// Orbit config domain model — ported from the macOS app (Models/Settings.swift).
+// Tietiezhi config domain model — ported from the macOS app (Models/Settings.swift).
 // Layering is deliberate and shared across every platform:
 //   ApiProvider (厂商: baseUrl + apiKey + auth)
 //     └─ ModelConfig (具体模型) —— 挂到某厂商，声明自己走哪种 Wire

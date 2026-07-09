@@ -10,11 +10,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = SettingsStore();
   await store.load();
-  runApp(OrbitApp(store: store));
+  runApp(TietiezhiApp(store: store));
 }
 
-class OrbitApp extends StatelessWidget {
-  const OrbitApp({super.key, required this.store});
+class TietiezhiApp extends StatelessWidget {
+  const TietiezhiApp({super.key, required this.store});
   final SettingsStore store;
 
   @override
@@ -25,10 +25,10 @@ class OrbitApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ChatController(store)),
       ],
       child: MaterialApp(
-        title: 'Orbit',
+        title: 'Tietiezhi',
         debugShowCheckedModeBanner: false,
-        theme: orbitTheme(),
-        home: const OrbitShell(),
+        theme: tietiezhiTheme(),
+        home: const TietiezhiShell(),
       ),
     );
   }

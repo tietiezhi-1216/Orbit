@@ -25,10 +25,10 @@ class SettingsScaffold extends StatelessWidget {
             children: [
               Text(title,
                   style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w700, color: OrbitColors.text)),
+                      fontSize: 20, fontWeight: FontWeight.w700, color: TietiezhiColors.text)),
               if (subtitle != null) ...[
                 const SizedBox(height: 4),
-                Text(subtitle!, style: const TextStyle(fontSize: 13, color: OrbitColors.textDim)),
+                Text(subtitle!, style: const TextStyle(fontSize: 13, color: TietiezhiColors.textDim)),
               ],
               const SizedBox(height: 18),
               ...children,
@@ -44,9 +44,9 @@ Widget _card({required Widget child}) => Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: OrbitColors.panel,
+        color: TietiezhiColors.panel,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: OrbitColors.border),
+        border: Border.all(color: TietiezhiColors.border),
       ),
       child: child,
     );
@@ -55,7 +55,7 @@ Widget _sectionLabel(String t) => Padding(
       padding: const EdgeInsets.only(top: 14, bottom: 6),
       child: Text(t,
           style: const TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: OrbitColors.textDim)),
+              fontSize: 12, fontWeight: FontWeight.w600, color: TietiezhiColors.textDim)),
     );
 
 Widget _field(String label,
@@ -67,7 +67,7 @@ Widget _field(String label,
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
-          child: Text(label, style: const TextStyle(fontSize: 12, color: OrbitColors.textDim)),
+          child: Text(label, style: const TextStyle(fontSize: 12, color: TietiezhiColors.textDim)),
         ),
         TextFormField(
           key: key,
@@ -91,13 +91,13 @@ Widget _switchRow(String label, bool value, ValueChanged<bool> onChanged, {Strin
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: const TextStyle(fontSize: 14, color: OrbitColors.text)),
+              Text(label, style: const TextStyle(fontSize: 14, color: TietiezhiColors.text)),
               if (sub != null)
-                Text(sub, style: const TextStyle(fontSize: 11.5, color: OrbitColors.textDim)),
+                Text(sub, style: const TextStyle(fontSize: 11.5, color: TietiezhiColors.textDim)),
             ],
           ),
         ),
-        Switch(value: value, onChanged: onChanged, activeThumbColor: OrbitColors.accent),
+        Switch(value: value, onChanged: onChanged, activeThumbColor: TietiezhiColors.accent),
       ],
     ),
   );
@@ -134,7 +134,7 @@ class _ProvidersSectionState extends State<ProvidersSection> {
             value: s.activeChatModel?.id,
             isExpanded: true,
             underline: const SizedBox(),
-            dropdownColor: OrbitColors.panel,
+            dropdownColor: TietiezhiColors.panel,
             hint: const Text('（无可用模型）'),
             items: [
               for (final m in s.models)
@@ -169,15 +169,15 @@ class _ProvidersSectionState extends State<ProvidersSection> {
         children: [
           Row(
             children: [
-              const Icon(Icons.dns_outlined, size: 18, color: OrbitColors.accent),
+              const Icon(Icons.dns_outlined, size: 18, color: TietiezhiColors.accent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(p.name.isEmpty ? '未命名厂商' : p.name,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: OrbitColors.text)),
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: TietiezhiColors.text)),
               ),
               IconButton(
                 tooltip: '删除厂商',
-                icon: const Icon(Icons.delete_outline, size: 18, color: OrbitColors.textDim),
+                icon: const Icon(Icons.delete_outline, size: 18, color: TietiezhiColors.textDim),
                 onPressed: () {
                   s.providers.remove(p);
                   s.models.removeWhere((m) => m.providerId == p.id);
@@ -191,18 +191,18 @@ class _ProvidersSectionState extends State<ProvidersSection> {
           _field('Base URL', key: ValueKey('${p.id}-url'), initial: p.baseUrl, hint: 'https://api.openai.com/v1', onChanged: (v) { p.baseUrl = v; store.save(); }),
           _field('API Key', key: ValueKey('${p.id}-key'), initial: p.apiKey, obscure: true, onChanged: (v) { p.apiKey = v; store.save(); }),
           Row(children: [
-            const Text('鉴权', style: TextStyle(fontSize: 12, color: OrbitColors.textDim)),
+            const Text('鉴权', style: TextStyle(fontSize: 12, color: TietiezhiColors.textDim)),
             const SizedBox(width: 10),
             DropdownButton<AuthScheme>(
               value: p.auth,
-              dropdownColor: OrbitColors.panel,
+              dropdownColor: TietiezhiColors.panel,
               underline: const SizedBox(),
               items: [for (final a in AuthScheme.values) DropdownMenuItem(value: a, child: Text(a.displayName))],
               onChanged: (a) { p.auth = a ?? p.auth; _save(); },
             ),
           ]),
-          const Divider(color: OrbitColors.border, height: 20),
-          Text('模型（${models.length}）', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: OrbitColors.textDim)),
+          const Divider(color: TietiezhiColors.border, height: 20),
+          Text('模型（${models.length}）', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: TietiezhiColors.textDim)),
           const SizedBox(height: 4),
           for (final m in models) _modelRow(m),
           Align(
@@ -222,7 +222,7 @@ class _ProvidersSectionState extends State<ProvidersSection> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: OrbitColors.panelAlt, borderRadius: BorderRadius.circular(9)),
+      decoration: BoxDecoration(color: TietiezhiColors.panelAlt, borderRadius: BorderRadius.circular(9)),
       child: Column(
         children: [
           Row(children: [
@@ -231,11 +231,11 @@ class _ProvidersSectionState extends State<ProvidersSection> {
             Expanded(child: _field('模型 ID', key: ValueKey('${m.id}-mid'), initial: m.modelId, hint: 'gpt-4o-mini', onChanged: (v) { m.modelId = v; store.save(); })),
           ]),
           Row(children: [
-            const Text('协议', style: TextStyle(fontSize: 12, color: OrbitColors.textDim)),
+            const Text('协议', style: TextStyle(fontSize: 12, color: TietiezhiColors.textDim)),
             const SizedBox(width: 10),
             DropdownButton<Wire>(
               value: m.wire,
-              dropdownColor: OrbitColors.panel,
+              dropdownColor: TietiezhiColors.panel,
               underline: const SizedBox(),
               items: [for (final w in Wire.values) DropdownMenuItem(value: w, child: Text(w.displayName))],
               onChanged: (w) { m.wire = w ?? m.wire; _save(); },
@@ -243,7 +243,7 @@ class _ProvidersSectionState extends State<ProvidersSection> {
             const Spacer(),
             IconButton(
               tooltip: '删除模型',
-              icon: const Icon(Icons.close, size: 16, color: OrbitColors.textDim),
+              icon: const Icon(Icons.close, size: 16, color: TietiezhiColors.textDim),
               onPressed: () { s.models.remove(m); _save(); },
             ),
           ]),
@@ -285,11 +285,11 @@ class _DictationBasicSectionState extends State<DictationBasicSection> {
         _card(child: Column(children: [
           _field('工作语言', key: const ValueKey('dic-lang'), initial: d.workingLanguages, hint: '逗号分隔，如：中文, English', onChanged: (v) { d.workingLanguages = v; store.save(); }),
           Row(children: [
-            const Text('输出语言', style: TextStyle(fontSize: 12, color: OrbitColors.textDim)),
+            const Text('输出语言', style: TextStyle(fontSize: 12, color: TietiezhiColors.textDim)),
             const SizedBox(width: 10),
             DropdownButton<String>(
               value: d.outputLanguage,
-              dropdownColor: OrbitColors.panel,
+              dropdownColor: TietiezhiColors.panel,
               underline: const SizedBox(),
               items: const [
                 DropdownMenuItem(value: 'auto', child: Text('自动')),
@@ -314,12 +314,12 @@ class _DictationBasicSectionState extends State<DictationBasicSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: OrbitColors.textDim)),
+        Text(label, style: const TextStyle(fontSize: 12, color: TietiezhiColors.textDim)),
         DropdownButton<String?>(
           value: value,
           isExpanded: true,
           underline: const SizedBox(),
-          dropdownColor: OrbitColors.panel,
+          dropdownColor: TietiezhiColors.panel,
           items: [
             const DropdownMenuItem(value: null, child: Text('— 无 —')),
             for (final m in models)
@@ -367,7 +367,7 @@ class _CaptureBasicSectionState extends State<CaptureBasicSection> {
           value: c.annotationModelId,
           isExpanded: true,
           underline: const SizedBox(),
-          dropdownColor: OrbitColors.panel,
+          dropdownColor: TietiezhiColors.panel,
           items: [
             const DropdownMenuItem(value: null, child: Text('— 无 —')),
             for (final m in store.settings.chatModels)
@@ -420,20 +420,20 @@ class AboutSection extends StatelessWidget {
         _card(child: Row(children: [
           Container(
             width: 44, height: 44,
-            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [OrbitColors.accent, OrbitColors.accent2])),
+            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [TietiezhiColors.accent, TietiezhiColors.accent2])),
           ),
           const SizedBox(width: 14),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-            Text('Orbit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: OrbitColors.text)),
+            Text('Tietiezhi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: TietiezhiColors.text)),
             SizedBox(height: 2),
-            Text('开放的多模态 AI 平台 · Flutter 全端重构中', style: TextStyle(fontSize: 12.5, color: OrbitColors.textDim)),
+            Text('开放的多模态 AI 平台 · Flutter 全端重构中', style: TextStyle(fontSize: 12.5, color: TietiezhiColors.textDim)),
           ]),
         ])),
         _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-          Text('权限（各端原生分期）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: OrbitColors.text)),
+          Text('权限（各端原生分期）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: TietiezhiColors.text)),
           SizedBox(height: 6),
           Text('• 麦克风 —— 听写录音\n• 辅助功能 —— 全局热键 / 自动粘贴 / 元素级框选\n• 屏幕录制 —— 截图\n这些能力依赖各平台原生插件，随功能逐步接入。',
-              style: TextStyle(fontSize: 12.5, color: OrbitColors.textDim, height: 1.5)),
+              style: TextStyle(fontSize: 12.5, color: TietiezhiColors.textDim, height: 1.5)),
         ])),
       ],
     );
@@ -454,12 +454,12 @@ class PlaceholderSection extends StatelessWidget {
       title: title,
       children: [
         _card(child: Row(children: [
-          Icon(icon, size: 22, color: OrbitColors.accent),
+          Icon(icon, size: 22, color: TietiezhiColors.accent),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('即将推出', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: OrbitColors.text)),
+            const Text('即将推出', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: TietiezhiColors.text)),
             const SizedBox(height: 4),
-            Text(description, style: const TextStyle(fontSize: 12.5, color: OrbitColors.textDim, height: 1.5)),
+            Text(description, style: const TextStyle(fontSize: 12.5, color: TietiezhiColors.textDim, height: 1.5)),
           ])),
         ])),
       ],

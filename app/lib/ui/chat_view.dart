@@ -53,22 +53,22 @@ class _ChatViewState extends State<ChatView> {
                   style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: OrbitColors.text)),
+                      color: TietiezhiColors.text)),
               const SizedBox(width: 10),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                    color: OrbitColors.panelAlt,
+                    color: TietiezhiColors.panelAlt,
                     borderRadius: BorderRadius.circular(7)),
                 child: Text(chat.activeModelName,
                     style: const TextStyle(
-                        fontSize: 12, color: OrbitColors.textDim)),
+                        fontSize: 12, color: TietiezhiColors.textDim)),
               ),
               const Spacer(),
               TextButton(
                   onPressed: chat.clear,
                   child: const Text('清空',
-                      style: TextStyle(color: OrbitColors.textDim))),
+                      style: TextStyle(color: TietiezhiColors.textDim))),
             ],
           ),
           const SizedBox(height: 8),
@@ -96,7 +96,7 @@ class _ChatViewState extends State<ChatView> {
                   maxLines: 5,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _submit(chat),
-                  decoration: const InputDecoration(hintText: '给 Orbit 发消息…'),
+                  decoration: const InputDecoration(hintText: '给 Tietiezhi 发消息…'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -128,7 +128,7 @@ class _Bubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         constraints: const BoxConstraints(maxWidth: 600),
         decoration: BoxDecoration(
-          color: msg.isUser ? OrbitColors.accent : OrbitColors.panelAlt,
+          color: msg.isUser ? TietiezhiColors.accent : TietiezhiColors.panelAlt,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -140,7 +140,7 @@ class _Bubble extends StatelessWidget {
             const SizedBox(height: 3),
             SelectableText(
               msg.text.isEmpty ? '…' : msg.text,
-              style: const TextStyle(color: OrbitColors.text, fontSize: 14),
+              style: const TextStyle(color: TietiezhiColors.text, fontSize: 14),
             ),
           ],
         ),

@@ -10,7 +10,7 @@ import 'models.dart';
 /// ChangeNotifier so the UI rebuilds after edits. Tolerant load (a corrupt/missing
 /// value yields a sensible seed, never a crash).
 class SettingsStore extends ChangeNotifier {
-  static const _key = 'orbit.config.v1';
+  static const _key = 'tietiezhi.config.v1';
 
   Settings settings = Settings();
   SharedPreferences? _prefs;

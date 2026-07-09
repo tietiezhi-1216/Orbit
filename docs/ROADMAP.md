@@ -1,8 +1,8 @@
-# 🗺️ Orbit Roadmap
+# 🗺️ Tietiezhi Roadmap
 
-English · [简体中文](#-orbit-路线图中文)
+English · [简体中文](#-tietiezhi-路线图中文)
 
-> Orbit grows **one satellite at a time**. The core comes first; each modality is launched into orbit only once it can stand on its own. Milestones are directional, not dated — sequencing matters more than deadlines this early.
+> Tietiezhi grows **one satellite at a time**. The core comes first; each modality is launched into tietiezhi only once it can stand on its own. Milestones are directional, not dated — sequencing matters more than deadlines this early.
 
 Legend: 🔲 planned · 🚧 in progress · ✅ done
 
@@ -20,7 +20,7 @@ The launchpad. Nothing orbits until the core exists.
 
 ## M1 · 🎙️ Voice Input — ASR 🚧
 
-Orbit's **first mission**. System-wide dictation that beats the incumbents.
+Tietiezhi's **first mission**. System-wide dictation that beats the incumbents.
 
 - ✅ Global hotkey capture (single right-⌘ or any recorded key) + audio pipeline (AVAudioEngine)
 - ✅ Pluggable ASR backends via the provider system — OpenAI-compatible **HTTP** today; **Realtime WebSocket** + 火山引擎 streaming next
@@ -40,7 +40,7 @@ Close the voice loop.
 
 ## M3 · 👁️ Vision 🔲
 
-Let Orbit see and draw.
+Let Tietiezhi see and draw.
 
 - 🔲 Image **understanding** satellite (screenshots, files, drag-and-drop, screen region capture)
 - 🔲 Image **generation** satellite
@@ -56,7 +56,7 @@ Time-based modalities.
 
 ## M5 · 🪐 Orchestration 🔲
 
-The actual *orbit* — satellites working together.
+The actual *tietiezhi* — satellites working together.
 
 - 🔲 Cross-modal workflows (e.g. *speak → transcribe → reason → generate image → read result back*)
 - 🔲 Visual / declarative workflow builder, every step a configurable node
@@ -76,16 +76,16 @@ Decentralize the constellation.
 
 ## How we decide what's next
 
-Orbit is **decentralized by design**. Priority emerges from issues and contributions, not a closed roadmap. When opinions conflict, the answer is usually *"both — as Options."* Open an issue to push something up the list.
+Tietiezhi is **decentralized by design**. Priority emerges from issues and contributions, not a closed roadmap. When opinions conflict, the answer is usually *"both — as Options."* Open an issue to push something up the list.
 
 ---
 ---
 
-# 🗺️ Orbit 路线图（中文）
+# 🗺️ Tietiezhi 路线图（中文）
 
-[English](#-orbit-roadmap) · 简体中文
+[English](#-tietiezhi-roadmap) · 简体中文
 
-> Orbit **一次发射一颗卫星**。内核优先；每个模态只有在能独立运转后才送入轨道。里程碑表示方向而非日期——在如此早期，顺序比截止时间更重要。
+> Tietiezhi **一次发射一颗卫星**。内核优先；每个模态只有在能独立运转后才送入轨道。里程碑表示方向而非日期——在如此早期，顺序比截止时间更重要。
 
 图例：🔲 计划中 · 🚧 进行中 · ✅ 已完成
 
@@ -103,7 +103,7 @@ Orbit is **decentralized by design**. Priority emerges from issues and contribut
 
 ## M1 · 🎙️ 语音输入 —— ASR 🚧
 
-Orbit 的**第一站**。超越现有产品的全局听写。
+Tietiezhi 的**第一站**。超越现有产品的全局听写。
 
 - ✅ 全局热键捕获（单独右 ⌘ 或任意录制按键）+ 音频管线（AVAudioEngine）
 - ✅ 经由 provider 系统的可插拔 ASR 后端 —— 当前 OpenAI 兼容 **HTTP**；**Realtime WebSocket** 与 火山引擎 流式为下一步
@@ -123,7 +123,7 @@ Orbit 的**第一站**。超越现有产品的全局听写。
 
 ## M3 · 👁️ 视觉 🔲
 
-让 Orbit 能看、能画。
+让 Tietiezhi 能看、能画。
 
 - 🔲 图像**理解**卫星（截图、文件、拖拽、屏幕区域捕获）
 - 🔲 图像**生成**卫星
@@ -159,4 +159,4 @@ Orbit 的**第一站**。超越现有产品的全局听写。
 
 ## 我们如何决定下一步
 
-Orbit **从设计上就是去中心化的**。优先级源于 Issue 与贡献，而非一份封闭的路线图。当意见冲突时，答案通常是「都要——作为选项」。提一个 Issue，把你想要的东西顶上来。
+Tietiezhi **从设计上就是去中心化的**。优先级源于 Issue 与贡献，而非一份封闭的路线图。当意见冲突时，答案通常是「都要——作为选项」。提一个 Issue，把你想要的东西顶上来。

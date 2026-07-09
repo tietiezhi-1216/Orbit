@@ -9,14 +9,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **坚持主流技术栈**——SwiftUI 为主，必要时用薄 AppKit 桥接（菜单栏、悬浮面板、事件监听）。不引入小众框架。
 4. **优先用主流、常见的方案解决问题**——能用系统框架（AVFoundation / URLSession / Combine）就不要自造轮子；新增能力先看是否能复用现有抽象（见下方「配置数据模型」）。
 
-## 仓库结构（平台拆分，2026-07 起）
+## 仓库结构（tietiezhi 单仓库，2026-07 合并起）
 
-仓库按平台分目录：
+本仓库由两个曾经独立的项目合并而成，整体品牌为 **Tietiezhi（铁铁汁）—— 万物互联的多模态 AI 平台**（原 `Orbit` 客户端 + 原 `tietiezhi` Go 后端）：
 
-- **`apple/`** —— macOS 原生应用（Swift Package + `build.sh`；本文件绝大部分讲的是它）。
-- **`windows/`** —— Windows 应用（Avalonia / .NET / C#，与 macOS 对齐的第二实现，开发中）。
+- **`server/`** —— Go 后端 hub（module `tietiezhi`），可部署到服务器的**单二进制**：OpenAI 兼容 API + Agent 运行时 + 飞书/Telegram 渠道 + 定时任务 + 子代理 + 内嵌 Web 控制台。**万物互联**层在 `server/internal/interconnect/`（WebSocket 设备注册 + 消息路由）。命令在 `server/` 下用 `task`（见 `server/Taskfile.yml`）。
+- **`app/`** —— Flutter 多模态客户端（Win/macOS/Linux/Android/iOS/Web）：聊天、听写、截图、图像/视频生成。包名 `tietiezhi`，bundle id `com.tietiezhi.tietiezhi`。互联客户端在 `app/lib/core/interconnect.dart`。
+- **`apple/`** —— 原生 macOS Swift/SwiftUI **参考实现**（历史，已被 Flutter 客户端取代，不进 CI 主线；下面「签名/权限/架构」等 Swift 细节都是讲它）。
 - **`shared/`** —— 跨端对齐的规格（模型配置 schema、协议 Wire 定义等，单一事实源）。
+- **`assets/brand/`** —— 章鱼 logo、字标、全端图标源文件（`tietiezhi-mark.svg` / `tietiezhi-logo.svg`）。
 - 根目录留 `docs/`、`.github/`、`README`、`LICENSE`、本文件。
+
+> ⚠️ 品牌已从 Orbit 全面改名为 Tietiezhi：显示名 `Tietiezhi`、包名/bundle id `com.tietiezhi.tietiezhi`、Go module `tietiezhi`。GitHub 远端目前仍是 `tietiezhi-1216/Orbit`（仓库改名是后续事）。
+
+## 万物互联（Interconnect）—— server/internal/interconnect
+
+服务端内置 WebSocket 设备 hub，是「章鱼」比喻的落地：hub 是头，每台连接的设备是触手。
+
+- `GET /v1/connect`（WebSocket）：设备连接并注册（发 `hello`），收发消息。
+- `GET /v1/devices`：REST 列出在线设备。
+- 消息信封 JSON：`{type, from, to, name, payload}`，`type` ∈ `hello|presence|message|ping|pong`；`to` 为空表示广播。
+- 掉线自动移除并广播新的 `presence` 在线列表。
+- 客户端对端：`app/lib/core/interconnect.dart`（Flutter `InterconnectClient`）。
 
 ## 常用命令（macOS，在 `apple/` 下执行）
 

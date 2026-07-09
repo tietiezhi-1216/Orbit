@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../dictation/dictation_controller.dart';
 import '../dictation/dictation_hotkey.dart';
+import 'capture_view.dart';
 import 'chat_view.dart';
 import 'dictation_pill.dart';
 import 'interconnect_view.dart';
@@ -20,7 +21,7 @@ class TietiezhiShell extends StatefulWidget {
 }
 
 class _TietiezhiShellState extends State<TietiezhiShell> {
-  int _index = 0; // 0 = chat, 1 = interconnect, 2 = settings
+  int _index = 0; // 0 = chat, 1 = interconnect, 2 = capture, 3 = settings
 
   @override
   void initState() {
@@ -49,7 +50,12 @@ class _TietiezhiShellState extends State<TietiezhiShell> {
               Expanded(
                 child: IndexedStack(
                   index: _index,
-                  children: const [ChatView(), InterconnectView(), SettingsPage()],
+                  children: const [
+                    ChatView(),
+                    InterconnectView(),
+                    CaptureView(),
+                    SettingsPage(),
+                  ],
                 ),
               ),
             ],
@@ -103,10 +109,16 @@ class _Rail extends StatelessWidget {
             onTap: () => onSelect(1),
           ),
           _RailButton(
-            icon: Icons.settings_outlined,
-            label: '设置',
+            icon: Icons.crop_free,
+            label: '截图',
             active: index == 2,
             onTap: () => onSelect(2),
+          ),
+          _RailButton(
+            icon: Icons.settings_outlined,
+            label: '设置',
+            active: index == 3,
+            onTap: () => onSelect(3),
           ),
           const Spacer(),
           const _MicButton(),

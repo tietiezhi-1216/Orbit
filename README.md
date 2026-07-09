@@ -8,7 +8,7 @@
 
 English · 简体中文
 
-[![CI](https://github.com/tietiezhi-1216/Orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/tietiezhi-1216/Orbit/actions/workflows/ci.yml)
+[![CI](https://github.com/tietiezhi-1216/tietiezhi/actions/workflows/ci.yml/badge.svg)](https://github.com/tietiezhi-1216/tietiezhi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-f59e0b.svg)](./docs/ROADMAP.md)
 [![Server](https://img.shields.io/badge/server-Go%201.26-00ADD8.svg?logo=go&logoColor=white)](./server)

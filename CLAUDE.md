@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Tietiezhi（铁铁汁）**是一个以 **AI 模型中转 / 接入**为核心的桌面工具软件——中转站的官方桌面客户端：配置 baseURL + API Key 即可使用聊天等能力。**闭源项目**（LICENSE 为专有协议）。本期只做 **Windows 和 macOS**，其它端暂不考虑但架构上不排斥。logo 为章鱼图标（`assets/brand/tietiezhi-mark.png`）。
 
+**长期愿景**：从「中转站客户端」演进为以**万物互联**为核心、结合 Agent、整合多模态（向量/文本/语音/音乐/视频/图片）模型的完整生态——多平台聊天集成（Codex / Claude Code / opencode / QwQ、聊天胶囊）、节点式工作流编排与自动化（AI 截图、短剧/电商场景）、把 `server/` 中转站内置进桌面并向 Claude Code / Codex 暴露本地 API。详见 `docs/ROADMAP.md`「长期愿景」。这些能力多数已在 `server/internal/` 有骨架；推进时「桌面端不动 server / 前端只做展示」等现行规范需重新划边界，落地某块前先与用户确认架构（`server` 作 sidecar 内置 vs 连远程）。
+
 ## 仓库结构
 
 - **`desktop/`** —— 桌面客户端主工程（**开发主线**）：Tauri 2（Rust）+ React 19 + TypeScript 严格模式 + Tailwind CSS v4 + shadcn/ui + zustand + TanStack Query + Vite。

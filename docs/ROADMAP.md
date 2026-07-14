@@ -18,3 +18,25 @@
 - [ ] Windows / macOS 签名、公证与自动更新
 - [ ] 万物互联（server interconnect）客户端接入
 - [ ] 用量 / 费用统计
+
+## 长期愿景（生态方向）
+
+> 终局定位：以**万物互联**为核心、结合 Agent 智能体、整合多模态（向量/文本/语音/音乐/视频/图片）模型的**完整软件生态**（闭源私有化）。桌面端从「中转站客户端」演进为承载整个 hub 的入口。以下为方向性规划，非近期迭代项；大部分能力在 `server/internal/` 已有模块骨架，桌面端侧重「接入 + 呈现 + 编排」。
+
+### 1. 聊天与集成
+- [ ] 集成 Codex / Claude Code / opencode / 国内 QwQ 等平台的聊天能力
+- [ ] 「聊天胶囊」
+- server 侧骨架：`agent/` `subagent/` `tool/` `mcp/` `skill/` `channel/`
+
+### 2. 自动化与工作流编排
+- [ ] AI 自动化截图
+- [ ] 节点式工作流编排：不同模型之间自由配置节点、连线
+- [ ] 手写脚本 / AI 生成自动化工作流，落地短剧、电商等场景
+- server 侧骨架：`scheduler/` `cron/` `command/` `hook/` `sandbox/` `workspace/`
+
+### 3. 中转与私有化嵌入
+- [ ] 将同级 `server/` 中转站直接内置进桌面端（无需额外暴露入口）
+- [ ] 向 Claude Code / Codex 暴露本地 API 端点，使其能接外部 API
+- server 侧骨架：整个 `server/` 单二进制；多模态 `media/` `llm/`、万物互联 `interconnect/`
+
+> 两个地基级架构决策待定：① `server/` 以 Tauri sidecar 进程内置本地跑，还是桌面只连远程 server；② 桌面端定位从「薄客户端」放宽到「hub 壳」后，`CLAUDE.md` 相关规范（「不动 server / 前端只做展示」）的边界调整。

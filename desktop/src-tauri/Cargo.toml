@@ -16,3 +16,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# rustls avoids the OpenSSL toolchain dependency on Windows CI runners.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "sync", "time"] }
+tokio-util = "0.7"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+[dev-dependencies]
+# The SSE integration test runs a raw TCP mock relay.
+tokio = { version = "1", features = ["net", "io-util", "rt", "macros"] }

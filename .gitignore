@@ -1,15 +1,20 @@
-# ---- Swift / SwiftPM ----
-.build/
-.swiftpm/
-DerivedData/
-*.app
-
 # ---- macOS ----
 .DS_Store
 
+# ---- Node / 前端 ----
+node_modules/
+desktop/dist/
+pnpm-debug.log*
+*.local
+
+# ---- Tauri / Rust ----
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+
 # ---- Editors ----
 .idea/
-*.xcuserstate
+.vscode/
+*.swp
 
 # ---- Env & secrets ----
 .env

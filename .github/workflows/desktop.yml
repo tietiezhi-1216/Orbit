@@ -74,6 +74,23 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
+      # Tauri 只公证并装订了 .app，未公证外层 dmg（下载 dmg 仍会被 Gatekeeper 拦）。
+      # 这里对 dmg 单独公证 + 装订，实现「下载 dmg 即开、零警告」。未配公证凭据则跳过。
+      - name: Notarize & staple DMG (macOS)
+        if: matrix.platform == 'macos'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_ID" ]; then echo "未配置公证凭据，跳过 dmg 公证"; exit 0; fi
+          DMG=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
+          [ -z "$DMG" ] && { echo "未找到 dmg，跳过"; exit 0; }
+          echo "公证 dmg: $DMG"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:

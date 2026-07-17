@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type SettingsCategory =
   | "providers"
+  | "titleModel"
   | "systemPrompt"
   | "skills"
   | "mcp"
@@ -10,6 +11,7 @@ export type SettingsCategory =
   | "dictationModel"
   | "dictationHotkey"
   | "dictationPrompt"
+  | "archives"
   | "appearance"
   | "update"
   | "about";
@@ -36,6 +38,13 @@ interface UiState {
   /** Sidebar width in px (drag-resizable, persisted). */
   sidebarWidth: number;
   setSidebarWidth: (px: number) => void;
+  /** Per-project task-list expansion; missing ids default to expanded. */
+  expandedProjects: Record<string, boolean>;
+  setProjectExpanded: (id: string, expanded: boolean) => void;
+  projectsSectionExpanded: boolean;
+  setProjectsSectionExpanded: (expanded: boolean) => void;
+  tasksSectionExpanded: boolean;
+  setTasksSectionExpanded: (expanded: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -57,10 +66,26 @@ export const useUiStore = create<UiState>()(
       closeAgents: () => set({ agentsOpen: false, editingAgentId: null }),
       sidebarWidth: SIDEBAR_DEFAULT_PX,
       setSidebarWidth: (px) => set({ sidebarWidth: clampSidebarWidth(px) }),
+      expandedProjects: {},
+      setProjectExpanded: (id, expanded) =>
+        set((state) => ({
+          expandedProjects: { ...state.expandedProjects, [id]: expanded },
+        })),
+      projectsSectionExpanded: true,
+      setProjectsSectionExpanded: (projectsSectionExpanded) =>
+        set({ projectsSectionExpanded }),
+      tasksSectionExpanded: false,
+      setTasksSectionExpanded: (tasksSectionExpanded) =>
+        set({ tasksSectionExpanded }),
     }),
     {
       name: "tietiezhi-ui",
-      partialize: (state) => ({ sidebarWidth: state.sidebarWidth }),
+      partialize: (state) => ({
+        sidebarWidth: state.sidebarWidth,
+        expandedProjects: state.expandedProjects,
+        projectsSectionExpanded: state.projectsSectionExpanded,
+        tasksSectionExpanded: state.tasksSectionExpanded,
+      }),
     },
   ),
 );

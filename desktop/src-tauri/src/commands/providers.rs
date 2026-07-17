@@ -93,7 +93,10 @@ pub fn list_providers(app: AppHandle) -> Result<Vec<ProviderView>, String> {
         .into_iter()
         .map(|p| {
             let has_key = secrets::get_provider_key(&p.id)?.is_some();
-            Ok(ProviderView { provider: p, has_key })
+            Ok(ProviderView {
+                provider: p,
+                has_key,
+            })
         })
         .collect()
 }
@@ -121,7 +124,10 @@ pub fn upsert_provider(
     }
     super::settings::save_settings(app.clone(), settings)?;
 
-    if let Some(key) = api_key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty()) {
+    if let Some(key) = api_key
+        .map(|k| k.trim().to_owned())
+        .filter(|k| !k.is_empty())
+    {
         secrets::set_provider_key(&provider.id, &key)?;
     }
     Ok(())
@@ -134,12 +140,16 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
     // Clear any selection that referenced the removed provider.
     for sel in [
         &mut settings.chat_provider_id,
+        &mut settings.title_provider_id,
         &mut settings.asr_provider_id,
         &mut settings.polish_provider_id,
     ] {
         if *sel == id {
             sel.clear();
         }
+    }
+    if settings.title_provider_id.is_empty() {
+        settings.title_model.clear();
     }
     super::settings::save_settings(app, settings)?;
     secrets::delete_provider_key(&id)
@@ -171,7 +181,10 @@ pub async fn fetch_provider_models(
         .filter(|k| !k.trim().is_empty())
         .or_else(|| stored.as_ref().map(|p| p.kind.clone()))
         .unwrap_or_else(|| "openai".into());
-    let key = match api_key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty()) {
+    let key = match api_key
+        .map(|k| k.trim().to_owned())
+        .filter(|k| !k.is_empty())
+    {
         Some(k) => Some(k),
         None => secrets::get_provider_key(&id)?,
     };
@@ -219,7 +232,10 @@ async fn fetch_models(
         }
     };
     let status = resp.status();
-    let body = resp.text().await.map_err(|e| format!("读取响应失败：{e}"))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败：{e}"))?;
     if !status.is_success() {
         let fb = fallback_models(kind);
         if !fb.is_empty() {

@@ -24,5 +24,8 @@ pub fn default_system_prompt() -> String {
 /// Names of the builtin tools, for the agent editor's tool toggles.
 #[tauri::command]
 pub fn list_builtin_tools() -> Vec<String> {
-    crate::tools::ALL_TOOLS.iter().map(|s| s.to_string()).collect()
+    crate::tools::ALL_TOOLS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }

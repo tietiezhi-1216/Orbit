@@ -50,7 +50,11 @@ pub fn glob_tool(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
     if hits.is_empty() {
         return Ok("[无匹配文件]".into());
     }
-    Ok(hits.into_iter().map(|(_, p)| p).collect::<Vec<_>>().join("\n"))
+    Ok(hits
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 pub fn grep_tool(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
@@ -81,7 +85,11 @@ pub fn grep_tool(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
         if !entry.file_type().is_file() {
             continue;
         }
-        if entry.metadata().map(|m| m.len() > MAX_FILE_BYTES).unwrap_or(true) {
+        if entry
+            .metadata()
+            .map(|m| m.len() > MAX_FILE_BYTES)
+            .unwrap_or(true)
+        {
             continue;
         }
         if let Some(m) = &name_matcher {
@@ -89,7 +97,9 @@ pub fn grep_tool(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
                 continue;
             }
         }
-        let Ok(raw) = std::fs::read(entry.path()) else { continue };
+        let Ok(raw) = std::fs::read(entry.path()) else {
+            continue;
+        };
         if raw.contains(&0) {
             continue; // binary
         }

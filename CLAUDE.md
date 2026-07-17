@@ -53,7 +53,7 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 ### 前端（`desktop/src/`）
 
 - **`components/ui/`** —— shadcn 生成的组件，原则上不手改（升级用 CLI 重拉）。
-- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏：新对话 + 会话记录列表 + 左下角设置入口）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
+- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏：新建任务 + 无项目任务 + 可折叠项目/任务列表 + 左下角设置入口）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
 - **`features/`** —— 按功能分模块：`chat/`（聊天页 + 顶栏模型选择器 `model-select.tsx`）、`settings/`（设置页，含中转站接入配置/外观/关于）。
 - **`stores/`** —— zustand：`ui.ts`（当前页面，**无路由库**，chat/settings 两页用状态切换）、`chat.ts`（会话列表 + 当前消息 + 流式发送；会话文件读写经模块级串行队列防乱序）。
 - **`lib/`** —— `utils.ts`（`cn()`）等工具与 API 封装。
@@ -63,10 +63,11 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 
 - `src/main.rs` 只是入口；逻辑在 `src/lib.rs`（`run()`）。
 - commands 按域拆分在 `src/commands/`；密钥存取封装在 `src/secrets.rs`（keyring，service = `com.tietiezhi.tietiezhi`）。
-- **Agent 体系**（2026-07-16）：`src/agent/`（工具调用环路 `loop_.rs`、事件 `events.rs`、默认系统提示词 `prompt.rs`）、`src/tools/`（内置工具 read_file/write_file/edit_file/list_dir/glob/grep/bash/fetch/skill，路径 jail 限制在会话工作区内）、`src/permission/`（三模式 ask/auto/full，PermissionBroker oneshot 阻塞等前端 `permission_respond`）、`src/skills/`（`app_data_dir()/skills/{name}/SKILL.md`，Anthropic 规范）、`src/mcp/`（基于官方 rmcp SDK 的 stdio + streamable HTTP 客户端，配置存 settings，工具名 `mcp__{server}__{tool}`）。智能体档案存 `app_config_dir()/agents.json`（提示词/模型覆盖/skills/MCP/工具/权限模式）；会话工作区=用户选的文件夹或 `app_data_dir()/workspaces/{conversation_id}` 虚拟目录。注意 rmcp 依赖 reqwest 0.13，与主工程 0.12 并存（Cargo.toml 里别名 `reqwest13`）。
+- **Agent 体系**（2026-07-16）：`src/agent/`（工具调用环路 `loop_.rs`、事件 `events.rs`、默认系统提示词 `prompt.rs`）、`src/tools/`（内置工具 read_file/write_file/edit_file/list_dir/glob/grep/bash/fetch/skill，路径 jail 限制在任务工作区内）、`src/permission/`（三模式 ask/auto/full，PermissionBroker oneshot 阻塞等前端 `permission_respond`）、`src/skills/`（`app_data_dir()/skills/{name}/SKILL.md`，Anthropic 规范）、`src/mcp/`（基于官方 rmcp SDK 的 stdio + streamable HTTP 客户端，配置存 settings，工具名 `mcp__{server}__{tool}`）。智能体档案存 `app_config_dir()/agents.json`（提示词/模型覆盖/skills/MCP/工具/权限模式）；任务工作区统一为 `app_data_dir()/tasks/{task_id}/workspace`，绑定项目时该目录是项目 Git worktree，未绑定时为空白托管目录。注意 rmcp 依赖 reqwest 0.13，与主工程 0.12 并存（Cargo.toml 里别名 `reqwest13`）。
 - **内置默认配置**在 `src/defaults.rs`：`DEFAULT_BASE_URL` / `DEFAULT_API_KEY` 编译进二进制（**发布前需填入官方中转站真实值**，默认 key 永不回传前端）；生效优先级=用户设置（settings.json / keyring）> 内置默认。请求类命令（聊天/模型列表）在 Rust 侧解析生效配置，前端不回传连接信息。
 - 设置（baseURL、默认模型等非敏感项）以 JSON 存 `app_config_dir()/settings.json`；**API Key 只进钥匙串**。
-- **会话记录**在 `src/commands/conversations.rs`：每会话一个 JSON 文件存 `app_data_dir()/conversations/{uuid}.json`，id 由前端 `crypto.randomUUID()` 生成、Rust 校验（仅字母数字与 `-`，防路径穿越），`updated_at` 由 Rust 落盘时生成。
+- **任务记录**在 `src/commands/conversations.rs`：每个任务存于 `app_data_dir()/tasks/{uuid}/task.json`，工作目录为同级 `workspace/`；id 由前端 `crypto.randomUUID()` 生成并由 Rust 严格校验，`updated_at` 由 Rust 落盘时生成。归档只设置 `archived_at` 并保留完整目录，可在设置中恢复；`pinned_at` 控制侧边栏独立置顶分组；永久删除才清理任务目录。旧 `conversations/{uuid}.json` 与 `workspaces/{uuid}` 启动时自动迁移。
+- **项目列表**在 `src/commands/projects.rs`：持久化到 `app_data_dir()/projects.json`，支持重命名和打开真实目录；任务可不绑定项目。绑定 Git 项目后，任务工作目录由 `src/commands/workspace.rs` 创建为隔离 worktree。项目真实目录永不随任务删除。
 - baseURL 归一化：用户填 `https://x.com` 或 `https://x.com/v1` 都可以，Rust 侧统一补 `/v1` 前缀后拼端点。
 - 聊天走 OpenAI 兼容 `/v1/chat/completions`（`stream: true`），SSE 解析在 Rust 侧完成，经 `tauri::ipc::Channel` 把 `{type: delta|done|error}` 事件推给前端；解析器有 `cargo test` 单元测试。
 - 能力声明在 `capabilities/default.json`（当前仅 `core:default`）。新增系统能力时先想想是否真的需要新权限。

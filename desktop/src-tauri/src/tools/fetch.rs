@@ -30,6 +30,10 @@ pub async fn fetch_tool(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
     if status.is_success() {
         Ok(body)
     } else {
-        Err(format!("HTTP {}：{}", status.as_u16(), crate::commands::snippet(&body)))
+        Err(format!(
+            "HTTP {}：{}",
+            status.as_u16(),
+            crate::commands::snippet(&body)
+        ))
     }
 }

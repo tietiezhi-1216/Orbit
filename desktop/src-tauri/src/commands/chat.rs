@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use super::{api_url, providers, snippet};
+use crate::agent::failure::ChatFailure;
 use crate::AppState;
 
 pub use crate::agent::events::ChatEvent;
@@ -79,7 +80,7 @@ pub async fn chat_stream(
     messages: Vec<ChatMessage>,
     conversation_id: Option<String>,
     agent_id: Option<String>,
-    workspace: Option<String>,
+    project_id: Option<String>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     let cancel = CancellationToken::new();
@@ -89,18 +90,21 @@ pub async fn chat_stream(
         .unwrap()
         .insert(request_id, cancel.clone());
 
-    let result = match providers::resolve(&app, &provider_id) {
+    let result: Result<bool, ChatFailure> = match providers::resolve(&app, &provider_id) {
         Ok(resolved) => {
             match super::agents::resolve_env(
                 &app,
                 agent_id.as_deref(),
-                workspace.as_deref(),
+                project_id.as_deref(),
                 conversation_id.as_deref(),
             ) {
                 Ok(env) => {
                     // Per-agent model override beats the frontend selection.
-                    let model = super::agents::model_override(&app, agent_id.as_deref())
-                        .unwrap_or(model);
+                    let model =
+                        super::agents::model_override(&app, agent_id.as_deref()).unwrap_or(model);
+                    let _ = on_event.send(ChatEvent::Started {
+                        model: model.clone(),
+                    });
                     crate::agent::loop_::run_agent_loop(
                         &app,
                         &state.http,
@@ -117,10 +121,10 @@ pub async fn chat_stream(
                     )
                     .await
                 }
-                Err(e) => Err(e),
+                Err(e) => Err(ChatFailure::message(e)),
             }
         }
-        Err(e) => Err(e),
+        Err(e) => Err(ChatFailure::message(e)),
     };
 
     state.chat_cancels.lock().unwrap().remove(&request_id);
@@ -128,7 +132,14 @@ pub async fn chat_stream(
 
     let final_event = match result {
         Ok(cancelled) => ChatEvent::Done { cancelled },
-        Err(message) => ChatEvent::Error { message },
+        Err(failure) => ChatEvent::Error {
+            message: failure.summary,
+            detail: failure.detail,
+            code: failure.code,
+            status: failure.status,
+            retryable: failure.retryable,
+            retries: failure.retries,
+        },
     };
     let _ = on_event.send(final_event);
     Ok(())
@@ -154,6 +165,9 @@ pub(crate) async fn stream_to_channel(
 
     let result = match providers::resolve(&app, &provider_id) {
         Ok(resolved) => {
+            let _ = on_event.send(ChatEvent::Started {
+                model: model.clone(),
+            });
             run_stream(
                 &state.http,
                 &resolved.base_url,
@@ -176,7 +190,17 @@ pub(crate) async fn stream_to_channel(
 
     let final_event = match result {
         Ok(cancelled) => ChatEvent::Done { cancelled },
-        Err(message) => ChatEvent::Error { message },
+        Err(message) => {
+            let failure = ChatFailure::message(message);
+            ChatEvent::Error {
+                message: failure.summary,
+                detail: failure.detail,
+                code: failure.code,
+                status: failure.status,
+                retryable: failure.retryable,
+                retries: failure.retries,
+            }
+        }
     };
     let _ = on_event.send(final_event);
     Ok(())
@@ -246,7 +270,9 @@ async fn run_stream(
         let chunk = chunk.map_err(|e| format!("流式读取中断：{e}"))?;
 
         for line in lines.push(&chunk) {
-            let Some(data) = sse_data(&line) else { continue };
+            let Some(data) = sse_data(&line) else {
+                continue;
+            };
             if data == "[DONE]" {
                 return Ok(false);
             }

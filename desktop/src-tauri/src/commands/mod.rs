@@ -7,10 +7,12 @@ pub mod hotkey;
 pub mod mcp;
 pub mod models;
 pub mod permissions;
+pub mod projects;
 pub mod providers;
 pub mod settings;
 pub mod skills;
 pub mod text_insert;
+pub mod titles;
 pub mod workspace;
 
 /// Join a user-supplied base URL with an API path, normalizing the common

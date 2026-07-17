@@ -1,17 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUp, Mic, Settings2, Square } from "lucide-react";
-import { AppIcon } from "@/components/app-icon";
+import { AppIconLoader } from "@/components/app-icon-loader";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorNotice } from "@/features/chat/error-notice";
 import { MessageItem } from "@/features/chat/message-item";
 import { ModelSelect } from "@/features/chat/model-select";
 import { PermissionPrompt } from "@/features/chat/permission-prompt";
+import { ProjectSelect } from "@/features/chat/project-select";
 import { ToolCallCard } from "@/features/chat/tool-call-card";
 import { dictationToggle, loadSettings } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat";
 import { useUiStore } from "@/stores/ui";
+
+type MascotPhase = "hero" | "docking" | "docked" | "undocking";
+
+const MASCOT_SIZE = 128;
+const MASCOT_MOVE_MS = 720;
+const MASCOT_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 export function ChatPage() {
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
@@ -19,27 +35,317 @@ export function ChatPage() {
   const activeId = useChatStore((s) => s.activeId);
   const items = useChatStore((s) => s.items);
   const streaming = useChatStore((s) => s.streaming);
+  const streamStartedAt = useChatStore((s) => s.streamStartedAt);
+  const streamModel = useChatStore((s) => s.streamModel);
+  const streamRetry = useChatStore((s) => s.streamRetry);
   const send = useChatStore((s) => s.send);
   const stop = useChatStore((s) => s.stop);
   const branchFrom = useChatStore((s) => s.branchFrom);
   const editAndResend = useChatStore((s) => s.editAndResend);
+  const retryFromError = useChatStore((s) => s.retryFromError);
 
   const [input, setInput] = useState("");
+  const [streamNow, setStreamNow] = useState(() => Date.now());
+  const [mascotPhase, setMascotPhase] = useState<MascotPhase>(() =>
+    items.length > 0 ? "docked" : "hero",
+  );
+  const [ghostVisible, setGhostVisible] = useState(false);
+  const [dockVisible, setDockVisible] = useState(true);
+  const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
+  const [peekExpression, setPeekExpression] = useState<"open" | "closed" | "look">(
+    "open",
+  );
+  const [peekHovered, setPeekHovered] = useState(false);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const scrollHostRef = useRef<HTMLDivElement>(null);
+  const heroMascotRef = useRef<HTMLDivElement>(null);
+  const dockMascotRef = useRef<HTMLDivElement>(null);
+  const ghostMascotRef = useRef<HTMLDivElement>(null);
+  const lastDockRectRef = useRef<DOMRect | null>(null);
+  const previousHasConversationRef = useRef(items.length > 0);
+  const transitionIdRef = useRef(0);
+  const ghostAnimationRef = useRef<Animation | null>(null);
+  const stickToBottomRef = useRef(true);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** IME state — see `isImeEnter` for why both of these are needed. */
   const composingRef = useRef(false);
   const compositionEndAt = useRef(0);
+  const peekTimersRef = useRef<number[]>([]);
 
   const providerId = settingsQuery.data?.chatProviderId ?? "";
   const model = settingsQuery.data?.chatModel ?? "";
   const ready = Boolean(providerId && model);
+  const lastItem = items[items.length - 1];
+  const waitingForPermission =
+    lastItem?.kind === "permission" && lastItem.decision == null;
+  const indicatorActive = streaming && !waitingForPermission;
+  const hasConversation = items.length > 0;
 
-  // Keep the newest message in view. Instant while streaming: a smooth scroll
-  // per flush never finishes before the next one starts, which reads as jank.
+  useEffect(() => {
+    if (!streaming) return;
+    setStreamNow(Date.now());
+    const timer = window.setInterval(() => setStreamNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [streaming]);
+
+  const elapsedSeconds =
+    streamStartedAt == null ? 0 : Math.max(0, Math.floor((streamNow - streamStartedAt) / 1_000));
+  const runningTool =
+    lastItem?.kind === "toolCall" && lastItem.status === "running" ? lastItem.name : null;
+  const streamStatus = streamRetry
+    ? `正在进行第 ${streamRetry.attempt}/${streamRetry.maxRetries} 次重试 · ${streamRetry.reason}`
+    : waitingForPermission
+      ? "等待授权"
+      : runningTool
+        ? `正在运行 ${runningTool}`
+        : "正在生成";
+  const peekVisible = hasConversation && mascotPhase === "docked" && !dockVisible;
+  const peekImage =
+    peekExpression === "closed"
+      ? "/octopus-loader/base-closed.png"
+      : peekExpression === "look"
+        ? "/octopus-loader/base-look-right.png"
+        : "/octopus-loader/base-open.png";
+
+  const clearPeekTimers = useCallback(() => {
+    peekTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    peekTimersRef.current = [];
+  }, []);
+
+  const startPeekReaction = useCallback(() => {
+    clearPeekTimers();
+    setPeekHovered(true);
+    setPeekExpression("closed");
+    peekTimersRef.current = [
+      window.setTimeout(() => setPeekExpression("look"), 150),
+      window.setTimeout(() => setPeekExpression("closed"), 720),
+      window.setTimeout(() => setPeekExpression("look"), 830),
+    ];
+  }, [clearPeekTimers]);
+
+  const stopPeekReaction = useCallback(() => {
+    clearPeekTimers();
+    setPeekHovered(false);
+    setPeekExpression("open");
+  }, [clearPeekTimers]);
+
+  const mascotTransform = useCallback(
+    (rect: DOMRect) =>
+      `translate3d(${rect.left + MASCOT_SIZE}px, ${rect.top + MASCOT_SIZE}px, 0) scale(${rect.width / MASCOT_SIZE})`,
+    [],
+  );
+
+  const primeGhost = useCallback(
+    (rect: DOMRect) => {
+      const ghost = ghostMascotRef.current;
+      if (!ghost) return;
+      ghostAnimationRef.current?.cancel();
+      setGhostVisible(true);
+      ghostAnimationRef.current = ghost.animate(
+        [{ transform: mascotTransform(rect) }, { transform: mascotTransform(rect) }],
+        { duration: 0, fill: "forwards" },
+      );
+    },
+    [mascotTransform],
+  );
+
+  const animateGhost = useCallback(
+    (
+      from: DOMRect,
+      to: DOMRect,
+      finalPhase: Extract<MascotPhase, "hero" | "docked">,
+      id: number,
+    ) => {
+      const ghost = ghostMascotRef.current;
+      if (!ghost || transitionIdRef.current !== id) return;
+
+      primeGhost(from);
+
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setMascotPhase(finalPhase);
+        setGhostVisible(false);
+        return;
+      }
+
+      ghostAnimationRef.current?.cancel();
+      const animation = ghost.animate(
+        [
+          { transform: mascotTransform(from) },
+          { transform: mascotTransform(to) },
+        ],
+        {
+          duration: MASCOT_MOVE_MS,
+          easing: MASCOT_EASING,
+          fill: "forwards",
+        },
+      );
+      ghostAnimationRef.current = animation;
+      animation.onfinish = () => {
+        if (transitionIdRef.current !== id) return;
+        setMascotPhase(finalPhase);
+        window.requestAnimationFrame(() => {
+          if (transitionIdRef.current !== id) return;
+          setGhostVisible(false);
+        });
+      };
+    },
+    [mascotTransform, primeGhost],
+  );
+
+  useLayoutEffect(() => {
+    const previous = previousHasConversationRef.current;
+    if (previous === hasConversation) return;
+    previousHasConversationRef.current = hasConversation;
+    const id = ++transitionIdRef.current;
+    let firstFrame = 0;
+    let secondFrame = 0;
+
+    if (hasConversation) {
+      const from = heroMascotRef.current?.getBoundingClientRect();
+      if (from) primeGhost(from);
+      setMascotPhase("docking");
+      stickToBottomRef.current = true;
+      endRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => {
+          const to = dockMascotRef.current?.getBoundingClientRect();
+          if (!from || !to) {
+            setMascotPhase("docked");
+            setGhostVisible(false);
+            return;
+          }
+          lastDockRectRef.current = to;
+          animateGhost(from, to, "docked", id);
+        });
+      });
+    } else {
+      const from = lastDockRectRef.current;
+      const fromWasVisible = from != null && from.bottom > 48 && from.top < window.innerHeight;
+      if (from && fromWasVisible) primeGhost(from);
+      setMascotPhase("undocking");
+      firstFrame = window.requestAnimationFrame(() => {
+        const to = heroMascotRef.current?.getBoundingClientRect();
+        if (!from || !to || !fromWasVisible) {
+          setMascotPhase("hero");
+          setGhostVisible(false);
+          return;
+        }
+        animateGhost(from, to, "hero", id);
+      });
+    }
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [animateGhost, hasConversation, primeGhost]);
+
+  // Keep the filled transform until React has committed `visibility: hidden`.
+  // Cancelling it in the finish callback resets the fixed element to its base
+  // position before the opacity update is painted, causing a one-frame flash.
+  useLayoutEffect(() => {
+    if (ghostVisible) return;
+    ghostAnimationRef.current?.cancel();
+    ghostAnimationRef.current = null;
+  }, [ghostVisible]);
+
+  useEffect(() => {
+    const finishMovingMascot = () => {
+      const animation = ghostAnimationRef.current;
+      if (!animation || animation.playState === "idle") return;
+
+      ++transitionIdRef.current;
+      animation.cancel();
+      ghostAnimationRef.current = null;
+      setGhostVisible(false);
+      setMascotPhase(previousHasConversationRef.current ? "docked" : "hero");
+    };
+
+    window.addEventListener("resize", finishMovingMascot);
+    return () => window.removeEventListener("resize", finishMovingMascot);
+  }, []);
+
+  useEffect(
+    () => () => {
+      ghostAnimationRef.current?.cancel();
+      ghostAnimationRef.current = null;
+    },
+    [],
+  );
+  useEffect(() => {
+    const clearHoveredMessage = () => setHoveredMessageKey(null);
+    window.addEventListener("blur", clearHoveredMessage);
+    return () => window.removeEventListener("blur", clearHoveredMessage);
+  }, []);
+  useEffect(() => clearPeekTimers, [clearPeekTimers]);
+  useEffect(() => {
+    if (peekVisible) return;
+    clearPeekTimers();
+    setPeekHovered(false);
+    setPeekExpression("open");
+  }, [clearPeekTimers, peekVisible]);
+  useEffect(() => {
+    if (!peekVisible || peekHovered) return;
+
+    let reopenTimer = 0;
+    const blink = () => {
+      setPeekExpression("closed");
+      reopenTimer = window.setTimeout(() => setPeekExpression("open"), 145);
+    };
+    const firstBlink = window.setTimeout(blink, 2_600);
+    const blinkInterval = window.setInterval(blink, 4_800);
+
+    return () => {
+      window.clearTimeout(firstBlink);
+      window.clearTimeout(reopenTimer);
+      window.clearInterval(blinkInterval);
+    };
+  }, [peekHovered, peekVisible]);
+
+  useEffect(() => {
+    const viewport = scrollHostRef.current?.querySelector<HTMLElement>(
+      "[data-slot='scroll-area-viewport']",
+    );
+    const dock = dockMascotRef.current;
+    if (!viewport || !dock || !hasConversation) {
+      setDockVisible(true);
+      return;
+    }
+
+    const updateScrollState = () => {
+      setHoveredMessageKey(null);
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      stickToBottomRef.current = distanceFromBottom < 72;
+      lastDockRectRef.current = dock.getBoundingClientRect();
+    };
+
+    updateScrollState();
+    viewport.addEventListener("scroll", updateScrollState, { passive: true });
+    const observer = new IntersectionObserver(
+      ([entry]) => setDockVisible(entry.isIntersecting && entry.intersectionRatio >= 0.35),
+      { root: viewport, threshold: [0, 0.35, 1] },
+    );
+    observer.observe(dock);
+
+    return () => {
+      viewport.removeEventListener("scroll", updateScrollState);
+      observer.disconnect();
+    };
+  }, [activeId, hasConversation]);
+
+  useLayoutEffect(() => {
+    if (hasConversation && dockMascotRef.current) {
+      lastDockRectRef.current = dockMascotRef.current.getBoundingClientRect();
+    }
+  }, [hasConversation, items]);
+
+  // Keep following the stream only while the reader remains near the bottom.
   const streamingRef = useRef(streaming);
   streamingRef.current = streaming;
   useEffect(() => {
+    if (!stickToBottomRef.current) return;
     endRef.current?.scrollIntoView({
       behavior: streamingRef.current ? "instant" : "smooth",
       block: "end",
@@ -53,15 +359,36 @@ export function ChatPage() {
     },
     [editAndResend, providerId, model],
   );
+  const handleMessageHoverChange = useCallback((hoverKey: string | null) => {
+    setHoveredMessageKey(hoverKey);
+  }, []);
+
+  const assistantTurnTailIds = useMemo(() => {
+    const tailIds = new Set<number>();
+    let foundAssistantInTurn = false;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.kind !== "message") continue;
+      if (item.role !== "assistant") {
+        foundAssistantInTurn = false;
+        continue;
+      }
+      if (!foundAssistantInTurn) tailIds.add(item.id);
+      foundAssistantInTurn = true;
+    }
+    return tailIds;
+  }, [items]);
 
   // Focus the composer when switching / starting conversations.
   useEffect(() => {
+    stickToBottomRef.current = true;
     inputRef.current?.focus();
   }, [activeId]);
 
   const handleSend = () => {
     const text = input.trim();
     if (!text || streaming || !ready) return;
+    stickToBottomRef.current = true;
     setInput("");
     void send(providerId, model, text);
   };
@@ -81,15 +408,43 @@ export function ChatPage() {
     Date.now() - compositionEndAt.current < 100;
 
   return (
-    <div className="flex h-full flex-col">
-      {items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
-          <AppIcon size="lg" alt="铁铁汁" className="size-40 drop-shadow-sm" />
-          <div className="flex flex-col gap-1">
-            <p className="text-lg font-semibold">开始新对话</p>
-            <p className="text-muted-foreground text-sm">
-              {ready ? `当前模型：${model}` : "先在设置里添加供应商并选择模型"}
-            </p>
+    <div ref={pageRef} className="relative flex h-full flex-col overflow-hidden">
+      <div
+        ref={ghostMascotRef}
+        aria-hidden
+        className={cn(
+          "pointer-events-none fixed -top-32 -left-32 z-50 origin-top-left",
+          ghostVisible ? "visible opacity-100 will-change-transform" : "invisible opacity-0",
+        )}
+      >
+        <AppIconLoader active={false} idle={false} />
+      </div>
+
+      <div className="relative min-h-0 flex-1">
+        <div
+          aria-hidden={hasConversation}
+          className={cn(
+            "absolute inset-0 flex flex-col items-center justify-center px-4 pt-28 text-center transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none",
+            hasConversation
+              ? "pointer-events-none -translate-y-1 opacity-0"
+              : "translate-y-0 opacity-100",
+          )}
+        >
+          <div className="flex flex-col items-center gap-3">
+            <div ref={heroMascotRef} className="size-32">
+              <div className={mascotPhase === "hero" ? "opacity-100" : "opacity-0"}>
+                <AppIconLoader
+                  active={false}
+                  idle={!hasConversation && mascotPhase === "hero"}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-lg font-semibold">开始新任务</p>
+              <p className="text-muted-foreground text-sm">
+                {ready ? `当前模型：${model}` : "先在设置里添加供应商并选择模型"}
+              </p>
+            </div>
           </div>
           {!ready && (
             <Button variant="outline" size="sm" onClick={() => openSettings("providers")}>
@@ -97,32 +452,141 @@ export function ChatPage() {
             </Button>
           )}
         </div>
-      ) : (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6">
-            {items.map((item) =>
-              item.kind === "toolCall" ? (
-                <ToolCallCard key={item.id} item={item} />
-              ) : item.kind === "permission" ? (
-                <PermissionPrompt key={item.id} item={item} />
-              ) : (
-                <MessageItem
-                  key={item.id}
-                  item={item}
-                  onBranch={branchFrom}
-                  onEdit={handleEdit}
-                />
-              ),
-            )}
-            <div ref={endRef} />
-          </div>
-        </ScrollArea>
-      )}
+
+        <div
+          ref={scrollHostRef}
+          onPointerLeave={() => setHoveredMessageKey(null)}
+          aria-hidden={!hasConversation}
+          className={cn(
+            "absolute inset-0 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none",
+            hasConversation
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-1 opacity-0",
+          )}
+        >
+          <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:h-full">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 px-4 pt-6 pb-6">
+              {items.map((item, index) => {
+                const hoverKey = `${item.id}:${index}:${item.createdAt}`;
+                return item.kind === "toolCall" ? (
+                  <ToolCallCard key={item.id} item={item} />
+                ) : item.kind === "permission" ? (
+                  <PermissionPrompt key={item.id} item={item} />
+                ) : item.kind === "error" ? (
+                  <ErrorNotice
+                    key={item.id}
+                    item={item}
+                    retryDisabled={streaming || !ready}
+                    onRetry={() => {
+                      void retryFromError(item.id, providerId, model);
+                    }}
+                  />
+                ) : (
+                  <MessageItem
+                    key={item.id}
+                    item={item}
+                    hoverKey={hoverKey}
+                    hovered={hoveredMessageKey === hoverKey}
+                    showActions={
+                      item.role !== "assistant" || assistantTurnTailIds.has(item.id)
+                    }
+                    onBranch={branchFrom}
+                    onEdit={handleEdit}
+                    onHoverChange={handleMessageHoverChange}
+                  />
+                );
+              })}
+              <div
+                role="status"
+                aria-live="polite"
+                aria-label={
+                  streaming ? `${streamStatus}，已用时 ${elapsedSeconds} 秒` : "铁铁汁就绪"
+                }
+                className="mt-auto flex min-h-14 items-center gap-2"
+              >
+                <div ref={dockMascotRef} className="relative size-12 shrink-0">
+                  <div className={mascotPhase === "docked" ? "opacity-100" : "opacity-0"}>
+                    <AppIconLoader
+                      active={indicatorActive && mascotPhase === "docked" && dockVisible}
+                      className="origin-top-left scale-[0.375]"
+                      idle={hasConversation && mascotPhase === "docked" && dockVisible}
+                    />
+                  </div>
+                </div>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "text-muted-foreground flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs tabular-nums transition-[opacity,transform] duration-300",
+                    streaming && mascotPhase === "docked"
+                      ? "translate-x-0 opacity-100"
+                      : "-translate-x-1 opacity-0",
+                  )}
+                >
+                  <span className="truncate">{streamStatus}</span>
+                  <span>·</span>
+                  <span>{elapsedSeconds}s</span>
+                  {streamModel && (
+                    <>
+                      <span>·</span>
+                      <span>{streamModel}</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              <div ref={endRef} />
+            </div>
+          </ScrollArea>
+        </div>
+      </div>
 
       {/* Composer, laid out like Claude Code / Codex: the input owns its whole
           box, and the controls (model, dictation, send) sit on its bottom row. */}
-      <div className="mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
-        <div className="border-input bg-background focus-within:border-ring focus-within:ring-ring/30 flex flex-col rounded-2xl border px-2 pt-1.5 pb-1.5 shadow-sm transition-colors focus-within:ring-[3px]">
+      <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            stickToBottomRef.current = true;
+            endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          }}
+          onMouseEnter={startPeekReaction}
+          onMouseLeave={stopPeekReaction}
+          onFocus={startPeekReaction}
+          onBlur={stopPeekReaction}
+          aria-label="返回最新消息"
+          aria-hidden={!peekVisible}
+          title="返回最新消息"
+          tabIndex={peekVisible ? 0 : -1}
+          className={cn(
+            "group absolute top-0 right-5 z-0 h-16 w-16 origin-bottom overflow-visible rounded-full bg-transparent p-0 shadow-none transition-[opacity,transform] duration-500 ease-out hover:-translate-y-10 hover:-rotate-6 hover:bg-transparent focus-visible:-translate-y-10 focus-visible:-rotate-6 focus-visible:ring-0 active:scale-95 motion-reduce:transition-none",
+            peekVisible
+              ? "-translate-y-8 opacity-100"
+              : "pointer-events-none translate-y-2 scale-90 opacity-0",
+          )}
+        >
+          <span aria-hidden className="relative block size-16">
+            <img
+              src={peekImage}
+              alt=""
+              draggable={false}
+              className="absolute inset-0 size-16 max-w-none object-contain drop-shadow-sm transition-transform duration-500 ease-out group-hover:scale-105 group-focus-visible:scale-105"
+            />
+            <img
+              src="/octopus-loader/decor-05.png"
+              alt=""
+              draggable={false}
+              className="absolute top-1 right-0 size-4 translate-x-1 translate-y-2 rotate-12 opacity-0 transition-[opacity,transform] delay-100 duration-300 group-hover:translate-x-2 group-hover:-translate-y-1 group-hover:rotate-45 group-hover:opacity-100 group-focus-visible:translate-x-2 group-focus-visible:-translate-y-1 group-focus-visible:rotate-45 group-focus-visible:opacity-100"
+            />
+          </span>
+        </Button>
+
+        {activeId == null && items.length === 0 && (
+          <div className="bg-muted/70 relative z-10 mx-3 -mb-2 flex h-10 items-start rounded-t-xl border px-1.5 pt-1 shadow-sm">
+            <ProjectSelect />
+          </div>
+        )}
+
+        <div className="border-input bg-background focus-within:border-ring focus-within:ring-ring/30 relative z-20 flex flex-col rounded-2xl border px-2 pt-1.5 pb-1.5 shadow-sm transition-colors focus-within:ring-[3px]">
           <Textarea
             ref={inputRef}
             value={input}

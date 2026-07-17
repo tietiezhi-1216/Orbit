@@ -90,7 +90,11 @@ async fn transcribe_mimo(
     wav_base64: &str,
     language: &str,
 ) -> Result<String, String> {
-    let model = if model.trim().is_empty() { "mimo-v2.5-asr" } else { model };
+    let model = if model.trim().is_empty() {
+        "mimo-v2.5-asr"
+    } else {
+        model
+    };
     let data_url = format!("data:audio/wav;base64,{wav_base64}");
     let body = json!({
         "model": model,
@@ -110,7 +114,10 @@ async fn transcribe_mimo(
         .await
         .map_err(|e| format!("无法连接语音识别服务：{e}"))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("读取响应失败：{e}"))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败：{e}"))?;
     if !status.is_success() {
         return Err(format!(
             "语音识别返回 HTTP {}：{}",
@@ -157,7 +164,10 @@ async fn transcribe_whisper(
         .await
         .map_err(|e| format!("无法连接语音识别服务：{e}"))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("读取响应失败：{e}"))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败：{e}"))?;
     if !status.is_success() {
         return Err(format!(
             "语音识别返回 HTTP {}：{}",
@@ -228,10 +238,25 @@ pub async fn polish_stream(
         .unwrap_or_default();
     let system = compose_system(&options, &custom);
     let messages = vec![
-        ChatMessage { role: "system".into(), content: system },
-        ChatMessage { role: "user".into(), content: transcript },
+        ChatMessage {
+            role: "system".into(),
+            content: system,
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: transcript,
+        },
     ];
-    stream_to_channel(app, state, request_id, provider_id, model, messages, on_event).await
+    stream_to_channel(
+        app,
+        state,
+        request_id,
+        provider_id,
+        model,
+        messages,
+        on_event,
+    )
+    .await
 }
 
 /// The built-in polish template, exposed so the settings editor can show it as

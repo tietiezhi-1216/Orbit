@@ -60,7 +60,8 @@ fn read_agents(app: &AppHandle) -> Result<Vec<Agent>, String> {
         return Ok(Vec::new());
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取智能体失败：{e}"))?;
-    let file: AgentsFile = serde_json::from_str(&raw).map_err(|e| format!("智能体文件损坏：{e}"))?;
+    let file: AgentsFile =
+        serde_json::from_str(&raw).map_err(|e| format!("智能体文件损坏：{e}"))?;
     Ok(file.agents)
 }
 
@@ -90,41 +91,13 @@ pub(crate) fn model_override(app: &AppHandle, agent_id: Option<&str>) -> Option<
 pub(crate) fn resolve_env(
     app: &AppHandle,
     agent_id: Option<&str>,
-    workspace: Option<&str>,
+    project_id: Option<&str>,
     conversation_id: Option<&str>,
 ) -> Result<AgentEnv, String> {
     let settings = super::settings::read_settings(app)?;
     let agent = agent_id.and_then(|id| find_agent(app, id));
 
-    // Workspace: user-picked folder, else a per-conversation virtual folder.
-    let workspace = match workspace.map(str::trim).filter(|w| !w.is_empty()) {
-        Some(w) => {
-            let p = PathBuf::from(w);
-            if !p.is_dir() {
-                return Err("所选工作目录不存在".into());
-            }
-            p
-        }
-        None => {
-            let id = conversation_id.unwrap_or("scratch");
-            // Conversation ids are validated by the conversations module
-            // (uuid-shaped); guard again anyway.
-            if !id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-            {
-                return Err("非法的会话 ID".into());
-            }
-            let dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("无法定位数据目录：{e}"))?
-                .join("workspaces")
-                .join(id);
-            std::fs::create_dir_all(&dir).map_err(|e| format!("创建工作区失败：{e}"))?;
-            dir
-        }
-    };
+    let workspace = super::workspace::resolve_task_workspace(app, project_id, conversation_id)?;
 
     // Skills visible to this turn: all enabled ones, optionally narrowed by
     // the agent's selection.
@@ -155,7 +128,10 @@ pub(crate) fn resolve_env(
 
     let system_prompt = prompt::compose(
         &settings.system_prompt,
-        agent.as_ref().map(|a| a.system_prompt.as_str()).unwrap_or(""),
+        agent
+            .as_ref()
+            .map(|a| a.system_prompt.as_str())
+            .unwrap_or(""),
         &workspace.to_string_lossy(),
         &skill_list,
     );

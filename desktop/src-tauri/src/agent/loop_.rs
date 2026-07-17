@@ -9,7 +9,8 @@ use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::events::ChatEvent;
-use crate::commands::{api_url, snippet};
+use super::failure::{retry_delay_ms, ChatFailure, MAX_RETRIES};
+use crate::commands::api_url;
 use crate::mcp::{self, McpManager, McpServerConfig};
 use crate::permission::{needs_approval, Decision, PermissionBroker, PermissionMode};
 use crate::tools::{self, ToolCtx};
@@ -46,6 +47,18 @@ impl ToolCall {
 struct StreamChunk {
     #[serde(default)]
     choices: Vec<StreamChoice>,
+    #[serde(default)]
+    usage: Option<StreamUsage>,
+}
+
+#[derive(Deserialize)]
+struct StreamUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -153,11 +166,12 @@ async fn stream_once(
     tools: &[Value],
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
-) -> Result<StreamOutcome, String> {
+) -> Result<StreamOutcome, ChatFailure> {
     let mut body = json!({
         "model": model,
         "messages": transcript,
         "stream": true,
+        "stream_options": {"include_usage": true},
     });
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools.to_vec());
@@ -170,13 +184,19 @@ async fn stream_once(
 
     let resp = tokio::select! {
         _ = cancel.cancelled() => return Ok(StreamOutcome { text: String::new(), tool_calls: vec![], cancelled: true }),
-        r = req.send() => r.map_err(|e| format!("无法连接中转站：{e}"))?,
+        r = req.send() => r.map_err(ChatFailure::request)?,
     };
 
     let status = resp.status();
     if !status.is_success() {
+        let retry_after_ms = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|seconds| seconds.saturating_mul(1_000));
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("中转站返回 HTTP {}：{}", status.as_u16(), snippet(&body)));
+        return Err(ChatFailure::http(status, body, retry_after_ms));
     }
 
     let mut stream = resp.bytes_stream();
@@ -190,7 +210,7 @@ async fn stream_once(
             c = stream.next() => c,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk.map_err(|e| format!("流式读取中断：{e}"))?;
+        let chunk = chunk.map_err(|error| ChatFailure::stream(error, !text.is_empty()))?;
 
         for line in lines.push(&chunk) {
             let Some(data) = crate::commands::chat::sse_data(&line) else {
@@ -202,13 +222,29 @@ async fn stream_once(
             let Ok(parsed) = serde_json::from_str::<StreamChunk>(data) else {
                 continue;
             };
+            if let Some(usage) = parsed.usage {
+                let total_tokens = if usage.total_tokens == 0 {
+                    usage.prompt_tokens + usage.completion_tokens
+                } else {
+                    usage.total_tokens
+                };
+                if total_tokens > 0 {
+                    on_event
+                        .send(ChatEvent::Usage {
+                            prompt_tokens: usage.prompt_tokens,
+                            completion_tokens: usage.completion_tokens,
+                            total_tokens,
+                        })
+                        .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
+                }
+            }
             for choice in parsed.choices {
                 if let Some(content) = choice.delta.content {
                     if !content.is_empty() {
                         text.push_str(&content);
-                        on_event
-                            .send(ChatEvent::Delta { content })
-                            .map_err(|e| format!("推送消息到界面失败：{e}"))?;
+                        on_event.send(ChatEvent::Delta { content }).map_err(|e| {
+                            ChatFailure::channel(format!("推送消息到界面失败：{e}"))
+                        })?;
                     }
                 }
                 if let Some(deltas) = choice.delta.tool_calls {
@@ -216,7 +252,7 @@ async fn stream_once(
                         acc.push(d);
                     }
                 }
-                let _ = choice.finish_reason; // tool calls detected via accumulator
+                let _ = choice.finish_reason;
             }
         }
     }
@@ -226,6 +262,54 @@ async fn stream_once(
         tool_calls: acc.finish(),
         cancelled: false,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stream_with_retries(
+    http: &reqwest::Client,
+    base_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+    transcript: &[Value],
+    tools: &[Value],
+    cancel: &CancellationToken,
+    on_event: &Channel<ChatEvent>,
+) -> Result<StreamOutcome, ChatFailure> {
+    let mut retries = 0;
+    loop {
+        match stream_once(
+            http, base_url, api_key, model, transcript, tools, cancel, on_event,
+        )
+        .await
+        {
+            Ok(outcome) => return Ok(outcome),
+            Err(failure)
+                if failure.retryable && !failure.output_started && retries < MAX_RETRIES =>
+            {
+                retries += 1;
+                let delay_ms = retry_delay_ms(retries, failure.retry_after_ms);
+                on_event
+                    .send(ChatEvent::Retrying {
+                        attempt: retries,
+                        max_retries: MAX_RETRIES,
+                        delay_ms,
+                        reason: failure.retry_reason().into(),
+                    })
+                    .map_err(|e| ChatFailure::channel(format!("推送重试状态到界面失败：{e}")))?;
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        return Ok(StreamOutcome {
+                            text: String::new(),
+                            tool_calls: vec![],
+                            cancelled: true,
+                        });
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
+                }
+            }
+            Err(failure) => return Err(failure.with_retries(retries)),
+        }
+    }
 }
 
 fn permission_description(name: &str, args: &Value) -> String {
@@ -264,7 +348,7 @@ pub async fn run_agent_loop(
     env: AgentEnv,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
-) -> Result<bool, String> {
+) -> Result<bool, ChatFailure> {
     // Collect the model-facing tools: builtins + namespaced MCP tools.
     let mut tool_specs = tools::specs(&env.allowed_tools);
     for cfg in &env.mcp_configs {
@@ -300,7 +384,7 @@ pub async fn run_agent_loop(
     };
 
     for _ in 0..MAX_ITERATIONS {
-        let outcome = stream_once(
+        let outcome = stream_with_retries(
             http,
             base_url,
             api_key,
@@ -339,7 +423,7 @@ pub async fn run_agent_loop(
                     name: call.name.clone(),
                     args: args.clone(),
                 })
-                .map_err(|e| format!("推送消息到界面失败：{e}"))?;
+                .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
 
             // Permission gate.
             let mut allowed = true;
@@ -355,7 +439,7 @@ pub async fn run_agent_loop(
                         description: permission_description(&call.name, &args),
                         args: args.clone(),
                     })
-                    .map_err(|e| format!("推送消息到界面失败：{e}"))?;
+                    .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
                 match broker.wait(&perm_id, rx, cancel).await {
                     Decision::Allow => {}
                     Decision::AllowAlways => broker.allow_for_session(request_id, &call.name),
@@ -389,7 +473,7 @@ pub async fn run_agent_loop(
                     output: output.clone(),
                     is_error,
                 })
-                .map_err(|e| format!("推送消息到界面失败：{e}"))?;
+                .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
 
             transcript.push(json!({
                 "role": "tool",
@@ -398,14 +482,21 @@ pub async fn run_agent_loop(
             }));
         }
     }
-    Err(format!("已达到最大工具调用轮数（{MAX_ITERATIONS}），请开启新对话继续"))
+    Err(ChatFailure::message(format!(
+        "已达到最大工具调用轮数（{MAX_ITERATIONS}），请新建任务继续"
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn delta(index: Option<u32>, id: Option<&str>, name: Option<&str>, args: Option<&str>) -> ToolCallDelta {
+    fn delta(
+        index: Option<u32>,
+        id: Option<&str>,
+        name: Option<&str>,
+        args: Option<&str>,
+    ) -> ToolCallDelta {
         ToolCallDelta {
             index,
             id: id.map(Into::into),
@@ -419,7 +510,12 @@ mod tests {
     #[test]
     fn accumulator_joins_fragmented_arguments() {
         let mut acc = ToolCallAccumulator::default();
-        acc.push(delta(Some(0), Some("call_a"), Some("read_file"), Some("{\"pa")));
+        acc.push(delta(
+            Some(0),
+            Some("call_a"),
+            Some("read_file"),
+            Some("{\"pa"),
+        ));
         acc.push(delta(Some(0), None, None, Some("th\":\"a.txt\"}")));
         let calls = acc.finish();
         assert_eq!(calls.len(), 1);

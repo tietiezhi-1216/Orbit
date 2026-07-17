@@ -9,7 +9,11 @@ pub fn read_file(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
     let path = resolve_in_workspace(&ctx.workspace, str_arg(args, "path")?)?;
     let raw = std::fs::read(&path).map_err(|e| format!("读取文件失败：{e}"))?;
     let text = String::from_utf8_lossy(&raw);
-    let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
+    let offset = args
+        .get("offset")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .max(1) as usize;
     let limit = args
         .get("limit")
         .and_then(Value::as_u64)
@@ -44,7 +48,11 @@ pub fn write_file(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("创建目录失败：{e}"))?;
     }
     std::fs::write(&path, content).map_err(|e| format!("写入文件失败：{e}"))?;
-    Ok(format!("已写入 {}（{} 字节）", path.display(), content.len()))
+    Ok(format!(
+        "已写入 {}（{} 字节）",
+        path.display(),
+        content.len()
+    ))
 }
 
 pub fn edit_file(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
@@ -88,4 +96,3 @@ pub fn list_dir(ctx: &ToolCtx, args: &Value) -> Result<String, String> {
     }
     Ok(names.join("\n"))
 }
-

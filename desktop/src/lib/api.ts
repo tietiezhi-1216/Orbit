@@ -69,6 +69,14 @@ export interface Agent {
   permissionMode: PermissionMode;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  rootPath: string;
+  createdAt: number;
+  lastOpenedAt: number;
+}
+
 export interface Skill {
   name: string;
   description: string;
@@ -79,6 +87,9 @@ export interface AppSettings {
   providers: Provider[];
   chatProviderId: string;
   chatModel: string;
+  /** Empty pair = use the model selected for the conversation. */
+  titleProviderId: string;
+  titleModel: string;
   asrProviderId: string;
   asrModel: string;
   polishProviderId: string;
@@ -108,7 +119,7 @@ export interface ChatMessage {
 
 /** One persisted transcript entry; legacy files omit `kind` (= "message"). */
 export interface StoredMessage {
-  kind?: "message" | "toolCall" | "permission";
+  kind?: "message" | "toolCall" | "permission" | "error";
   role?: ChatRole;
   content?: string;
   error?: boolean;
@@ -119,6 +130,20 @@ export interface StoredMessage {
   toolArgs?: unknown;
   toolOutput?: string;
   decision?: PermissionDecision;
+  model?: string;
+  providerId?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  usageEstimated?: boolean;
+  firstTokenMs?: number;
+  durationMs?: number;
+  completedAt?: number;
+  errorDetail?: string;
+  errorCode?: string;
+  errorStatus?: number;
+  errorRetryable?: boolean;
+  errorRetries?: number;
 }
 
 export interface Conversation {
@@ -128,20 +153,39 @@ export interface Conversation {
   messages: StoredMessage[];
   /** Agent profile bound to this conversation; empty = default assistant. */
   agentId?: string;
-  /** User-picked workspace folder; empty = virtual workspace. */
-  workspace?: string;
+  /** Optional project binding; empty = standalone task. */
+  projectId?: string;
+  /** 0/undefined for active tasks; otherwise archive time in milliseconds. */
+  archivedAt?: number;
+  /** 0/undefined for normal tasks; otherwise pin time in milliseconds. */
+  pinnedAt?: number;
 }
 
 export interface ConversationMeta {
   id: string;
   title: string;
   updatedAt: number;
+  projectId: string;
+  archivedAt: number;
+  pinnedAt: number;
+}
+
+export interface SaveConversationResult {
+  updatedAt: number;
+  title: string;
 }
 
 export type PermissionDecision = "allow" | "allowAlways" | "deny";
 
 export type ChatEvent =
+  | { type: "started"; model: string }
   | { type: "delta"; content: string }
+  | {
+      type: "usage";
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    }
   | { type: "toolCallStart"; id: string; name: string; args: unknown }
   | { type: "toolResult"; id: string; output: string; isError: boolean }
   | {
@@ -151,8 +195,23 @@ export type ChatEvent =
       description: string;
       args: unknown;
     }
+  | {
+      type: "retrying";
+      attempt: number;
+      maxRetries: number;
+      delayMs: number;
+      reason: string;
+    }
   | { type: "done"; cancelled: boolean }
-  | { type: "error"; message: string };
+  | {
+      type: "error";
+      message: string;
+      detail: string;
+      code?: string;
+      status?: number;
+      retryable: boolean;
+      retries: number;
+    };
 
 // MARK: - Settings
 
@@ -208,7 +267,7 @@ export interface ChatStreamArgs {
   messages: ChatMessage[];
   conversationId?: string;
   agentId?: string;
-  workspace?: string;
+  projectId?: string;
   onEvent: (event: ChatEvent) => void;
 }
 
@@ -222,7 +281,7 @@ export function chatStream(args: ChatStreamArgs): Promise<void> {
     messages: args.messages,
     conversationId: args.conversationId ?? null,
     agentId: args.agentId ?? null,
-    workspace: args.workspace ?? null,
+    projectId: args.projectId ?? null,
     onEvent: channel,
   });
 }
@@ -305,6 +364,28 @@ export function mcpStopServer(id: string): Promise<void> {
 /** Folder picker; resolves null when dismissed. */
 export function pickWorkspaceDir(): Promise<string | null> {
   return invoke<string | null>("pick_workspace_dir");
+}
+
+// MARK: - Projects
+
+export function listProjects(): Promise<Project[]> {
+  return invoke<Project[]>("list_projects");
+}
+
+export function addProject(path: string): Promise<Project> {
+  return invoke<Project>("add_project", { path });
+}
+
+export function touchProject(id: string): Promise<Project> {
+  return invoke<Project>("touch_project", { id });
+}
+
+export function renameProject(id: string, name: string): Promise<Project> {
+  return invoke<Project>("rename_project", { id, name });
+}
+
+export function revealProject(id: string): Promise<void> {
+  return invoke("reveal_project", { id });
 }
 
 /** The built-in chat system prompt (settings editor's reset target). */
@@ -427,21 +508,57 @@ export function listConversations(): Promise<ConversationMeta[]> {
   return invoke<ConversationMeta[]>("list_conversations");
 }
 
+export function listArchivedConversations(): Promise<ConversationMeta[]> {
+  return invoke<ConversationMeta[]>("list_archived_conversations");
+}
+
 export function loadConversation(id: string): Promise<Conversation> {
   return invoke<Conversation>("load_conversation", { id });
 }
 
-/** Returns the server-stamped `updatedAt` of the saved conversation. */
+/** Returns server-authoritative metadata after preserving generated titles. */
 export function saveConversation(
   conversation: Omit<Conversation, "updatedAt">,
-): Promise<number> {
-  return invoke<number>("save_conversation", {
+): Promise<SaveConversationResult> {
+  return invoke<SaveConversationResult>("save_conversation", {
     conversation: { ...conversation, updatedAt: 0 },
+  });
+}
+
+export function generateConversationTitle(
+  id: string,
+  conversationProviderId: string,
+  conversationModel: string,
+  userMessage: string,
+  assistantMessage: string,
+): Promise<string | null> {
+  return invoke<string | null>("generate_conversation_title", {
+    id,
+    conversationProviderId,
+    conversationModel,
+    userMessage,
+    assistantMessage,
   });
 }
 
 export function deleteConversation(id: string): Promise<void> {
   return invoke("delete_conversation", { id });
+}
+
+export function archiveConversation(id: string): Promise<void> {
+  return invoke("archive_conversation", { id });
+}
+
+export function restoreConversation(id: string): Promise<void> {
+  return invoke("restore_conversation", { id });
+}
+
+export function setConversationPinned(id: string, pinned: boolean): Promise<number> {
+  return invoke<number>("set_conversation_pinned", { id, pinned });
+}
+
+export function archiveProjectConversations(projectId: string): Promise<number> {
+  return invoke<number>("archive_project_conversations", { projectId });
 }
 
 /** Normalize command rejections (Rust returns plain strings). */

@@ -1,6 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, GitBranch, Pencil, X } from "lucide-react";
-import { AppIconLoader } from "@/components/app-icon-loader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/features/chat/markdown";
@@ -22,27 +21,69 @@ function useNow(intervalMs = 15_000): number {
 function ActionRow({
   createdAt,
   align,
+  visible,
   children,
 }: {
   createdAt: number;
   align: "start" | "end";
+  visible: boolean;
   children?: React.ReactNode;
 }) {
   const now = useNow();
+  const [visibilityHeld, setVisibilityHeld] = useState(visible);
   const age = formatRelativeTime(createdAt, now);
+  const exactTime = createdAt > 0 ? new Date(createdAt).toLocaleString("zh-CN") : "";
+
+  useEffect(() => {
+    if (visible) {
+      setVisibilityHeld(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setVisibilityHeld(false), 200);
+    return () => window.clearTimeout(timer);
+  }, [visible]);
 
   return (
     <div
+      aria-hidden={!visible}
+      data-state={visible ? "visible" : "hidden"}
       className={cn(
-        // Hover-only. Deliberately NOT focus-within: a clicked button keeps
-        // focus, which would pin the row visible after the pointer leaves.
-        "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100",
+        "flex h-6 items-center gap-0.5 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
         align === "end" ? "justify-end" : "justify-start",
+        visibilityHeld ? "visible" : "invisible",
+        visible
+          ? "translate-y-0 opacity-100"
+          : "pointer-events-none translate-y-0.5 opacity-0",
       )}
     >
-      {age && <span className="text-muted-foreground px-1 text-[11px]">{age}</span>}
+      {age && (
+        <span className="text-muted-foreground px-1 text-[11px]" title={exactTime}>
+          {age}
+        </span>
+      )}
       {children}
     </div>
+  );
+}
+
+const formatDuration = (milliseconds: number): string => {
+  if (milliseconds < 1_000) return `${milliseconds}ms`;
+  const seconds = milliseconds / 1_000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+};
+
+const tokenFormatter = new Intl.NumberFormat("en-US");
+
+const formatTps = (tokensPerSecond: number): string =>
+  tokensPerSecond >= 100
+    ? Math.round(tokensPerSecond).toString()
+    : tokensPerSecond.toFixed(1);
+
+function MetaValue({ children, title }: { children: React.ReactNode; title: string }) {
+  return (
+    <span className="text-muted-foreground px-1 text-[11px]" title={title}>
+      {children}
+    </span>
   );
 }
 
@@ -74,8 +115,12 @@ export type MessageChatItem = Extract<ChatItem, { kind: "message" }>;
 
 interface MessageItemProps {
   item: MessageChatItem;
+  hoverKey: string;
+  hovered: boolean;
+  showActions: boolean;
   onBranch: (itemId: number) => void;
   onEdit: (itemId: number, text: string) => void;
+  onHoverChange: (hoverKey: string | null) => void;
 }
 
 /**
@@ -85,8 +130,12 @@ interface MessageItemProps {
  */
 export const MessageItem = memo(function MessageItem({
   item,
+  hoverKey,
+  hovered,
+  showActions,
   onBranch,
   onEdit,
+  onHoverChange,
 }: MessageItemProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.content);
@@ -113,11 +162,15 @@ export const MessageItem = memo(function MessageItem({
     }
 
     return (
-      <div className="group flex flex-col items-end gap-1">
+      <div
+        className="animate-in fade-in slide-in-from-bottom-1 flex flex-col items-end gap-1 duration-300"
+        onPointerEnter={() => onHoverChange(hoverKey)}
+        onPointerLeave={() => onHoverChange(null)}
+      >
         <div className="bg-muted max-w-[70%] rounded-xl px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap">
           {item.content}
         </div>
-        <ActionRow createdAt={item.createdAt} align="end">
+        <ActionRow createdAt={item.createdAt} align="end" visible={hovered}>
           <ActionButton
             icon={GitBranch}
             label="从这里开分支"
@@ -136,10 +189,27 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
+  const generationMs =
+    item.durationMs != null && item.firstTokenMs != null
+      ? item.durationMs - item.firstTokenMs
+      : null;
+  const tokensPerSecond =
+    !item.usageEstimated &&
+    item.completionTokens != null &&
+    item.completionTokens > 0 &&
+    generationMs != null &&
+    generationMs > 0
+      ? item.completionTokens / (generationMs / 1_000)
+      : null;
+
   // Assistant: plain prose, no bubble.
   return (
-    <div className="group flex min-w-0 flex-col gap-1">
-      {item.content ? (
+    <div
+      className="animate-in fade-in slide-in-from-bottom-1 flex min-w-0 flex-col gap-1 duration-300"
+      onPointerEnter={showActions ? () => onHoverChange(hoverKey) : undefined}
+      onPointerLeave={showActions ? () => onHoverChange(null) : undefined}
+    >
+      {item.content && (
         item.error ? (
           <p className="text-destructive text-sm leading-relaxed whitespace-pre-wrap">
             {item.content}
@@ -147,11 +217,44 @@ export const MessageItem = memo(function MessageItem({
         ) : (
           <Markdown content={item.content} />
         )
-      ) : (
-        <AppIconLoader />
       )}
-      {item.content && (
-        <ActionRow createdAt={item.createdAt} align="start">
+      {item.content && showActions && (
+        <ActionRow
+          createdAt={item.completedAt ?? item.createdAt}
+          align="start"
+          visible={hovered}
+        >
+          {item.model && (
+            <MetaValue
+              title={item.providerId ? `模型：${item.model} · 供应商：${item.providerId}` : `模型：${item.model}`}
+            >
+              {item.model}
+            </MetaValue>
+          )}
+          {item.totalTokens != null && !item.usageEstimated && (
+            <MetaValue
+              title={`实际 Token：输入 ${item.promptTokens ?? 0} · 输出 ${item.completionTokens ?? 0} · 总计 ${item.totalTokens}`}
+            >
+              {tokenFormatter.format(item.totalTokens)} tokens
+            </MetaValue>
+          )}
+          {tokensPerSecond != null && generationMs != null && (
+            <MetaValue
+              title={`实际生成速度：输出 ${tokenFormatter.format(item.completionTokens ?? 0)} Token ÷ ${formatDuration(generationMs)} = ${formatTps(tokensPerSecond)} Token/s`}
+            >
+              {formatTps(tokensPerSecond)} tokens/s
+            </MetaValue>
+          )}
+          {item.firstTokenMs != null && (
+            <MetaValue title={`从发送到收到第一个 Token：${item.firstTokenMs}ms`}>
+              首字 {formatDuration(item.firstTokenMs)}
+            </MetaValue>
+          )}
+          {item.durationMs != null && (
+            <MetaValue title={`本次回复总耗时：${item.durationMs}ms`}>
+              耗时 {formatDuration(item.durationMs)}
+            </MetaValue>
+          )}
           <ActionButton
             icon={copied ? Check : Copy}
             label={copied ? "已复制" : "复制"}

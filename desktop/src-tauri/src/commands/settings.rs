@@ -30,6 +30,10 @@ pub struct AppSettings {
     /// Selection for the main chat.
     pub chat_provider_id: String,
     pub chat_model: String,
+    /// Optional model dedicated to conversation-title generation. Empty means
+    /// follow the model used by the conversation itself.
+    pub title_provider_id: String,
+    pub title_model: String,
     /// Selection for dictation speech-to-text.
     pub asr_provider_id: String,
     pub asr_model: String,
@@ -196,4 +200,17 @@ pub fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<(), St
     settings.base_url = String::new();
     settings.model = String::new();
     write_settings(&app, &settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_settings_default_to_the_conversation_model_for_titles() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
+
+        assert!(settings.title_provider_id.is_empty());
+        assert!(settings.title_model.is_empty());
+    }
 }

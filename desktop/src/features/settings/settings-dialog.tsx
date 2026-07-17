@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import {
+  Archive,
   Info,
   Keyboard,
   Mic,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  Tags,
 } from "lucide-react";
 import { AppIcon } from "@/components/app-icon";
 import { Button } from "@/components/ui/button";
@@ -23,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/components/theme-provider";
 import type { Theme } from "@/components/theme-provider";
 import { DictationModelSection } from "@/features/settings/dictation-card";
+import { ArchivedTasksSection } from "@/features/settings/archived-tasks-section";
 import { DictationHotkeySection } from "@/features/settings/dictation-hotkey";
 import { DictationPromptSection } from "@/features/settings/dictation-prompt";
 import { McpSection } from "@/features/settings/mcp-section";
@@ -30,6 +33,7 @@ import { PermissionSection } from "@/features/settings/permission-section";
 import { ProviderManager } from "@/features/settings/provider-manager";
 import { SkillsSection } from "@/features/settings/skills-section";
 import { SystemPromptSection } from "@/features/settings/system-prompt-section";
+import { TitleModelSection } from "@/features/settings/title-model-section";
 import { SettingsSection } from "@/features/settings/settings-section";
 import { UpdateCard } from "@/features/settings/update-card";
 import { cn } from "@/lib/utils";
@@ -50,7 +54,10 @@ interface CategoryGroup {
 const GROUPS: CategoryGroup[] = [
   {
     label: "模型",
-    items: [{ key: "providers", label: "供应商", icon: Server }],
+    items: [
+      { key: "providers", label: "供应商", icon: Server },
+      { key: "titleModel", label: "标题生成", icon: Tags },
+    ],
   },
   {
     label: "智能体",
@@ -72,6 +79,7 @@ const GROUPS: CategoryGroup[] = [
   {
     label: "通用",
     items: [
+      { key: "archives", label: "已归档任务", icon: Archive },
       { key: "appearance", label: "外观", icon: Palette },
       { key: "update", label: "软件更新", icon: RefreshCw },
       { key: "about", label: "关于", icon: Info },
@@ -132,6 +140,7 @@ export function SettingsDialog() {
           </header>
           <div className="flex-1 overflow-y-auto px-7 py-6">
             {category === "providers" && <ProviderManager />}
+            {category === "titleModel" && <TitleModelSection />}
             {category === "systemPrompt" && <SystemPromptSection />}
             {category === "skills" && <SkillsSection />}
             {category === "mcp" && <McpSection />}
@@ -139,6 +148,7 @@ export function SettingsDialog() {
             {category === "dictationModel" && <DictationModelSection />}
             {category === "dictationHotkey" && <DictationHotkeySection />}
             {category === "dictationPrompt" && <DictationPromptSection />}
+            {category === "archives" && <ArchivedTasksSection />}
             {category === "appearance" && <AppearanceSection />}
             {category === "update" && <UpdateCard />}
             {category === "about" && <AboutSection />}

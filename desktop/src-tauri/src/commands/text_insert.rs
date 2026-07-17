@@ -29,14 +29,20 @@ fn set_clipboard(text: &str) -> Result<(), String> {
 #[tauri::command]
 pub fn deliver_text(text: String) -> Result<DeliverResult, String> {
     if text.trim().is_empty() {
-        return Ok(DeliverResult { inserted: false, needs_accessibility: false });
+        return Ok(DeliverResult {
+            inserted: false,
+            needs_accessibility: false,
+        });
     }
     set_clipboard(&text)?;
 
     #[cfg(target_os = "macos")]
     {
         if !mac::is_process_trusted() {
-            return Ok(DeliverResult { inserted: false, needs_accessibility: true });
+            return Ok(DeliverResult {
+                inserted: false,
+                needs_accessibility: true,
+            });
         }
         if mac::is_editable_focus() {
             // Give focus/clipboard a beat to settle, then paste off the main
@@ -45,13 +51,22 @@ pub fn deliver_text(text: String) -> Result<DeliverResult, String> {
                 std::thread::sleep(std::time::Duration::from_millis(90));
                 mac::paste_cmd_v();
             });
-            return Ok(DeliverResult { inserted: true, needs_accessibility: false });
+            return Ok(DeliverResult {
+                inserted: true,
+                needs_accessibility: false,
+            });
         }
-        return Ok(DeliverResult { inserted: false, needs_accessibility: false });
+        return Ok(DeliverResult {
+            inserted: false,
+            needs_accessibility: false,
+        });
     }
 
     #[cfg(not(target_os = "macos"))]
-    Ok(DeliverResult { inserted: false, needs_accessibility: false })
+    Ok(DeliverResult {
+        inserted: false,
+        needs_accessibility: false,
+    })
 }
 
 /// Whether macOS Accessibility is granted (auto-insert needs it).
@@ -69,9 +84,9 @@ pub fn accessibility_trusted() -> bool {
 
 #[cfg(target_os = "macos")]
 mod mac {
+    use core_foundation::base::TCFType;
     use core_foundation::base::{CFRelease, CFTypeRef};
     use core_foundation::string::{CFString, CFStringRef};
-    use core_foundation::base::TCFType;
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use std::ptr;

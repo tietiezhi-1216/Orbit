@@ -9,20 +9,25 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AgentsDialog } from "@/features/agents/agents-dialog";
 import { AgentSelect } from "@/features/chat/agent-select";
 import { ChatPage } from "@/features/chat/chat-page";
-import { WorkspaceIndicator } from "@/features/chat/workspace-indicator";
 import { SettingsDialog } from "@/features/settings/settings-dialog";
 import { useChatStore } from "@/stores/chat";
+import { useProjectStore } from "@/stores/projects";
 import { useUiStore } from "@/stores/ui";
 
 export default function App() {
   const activeId = useChatStore((s) => s.activeId);
   const conversations = useChatStore((s) => s.conversations);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
-  const title = conversations.find((c) => c.id === activeId)?.title ?? "新对话";
+  const title = conversations.find((c) => c.id === activeId)?.title ?? "新建任务";
 
   // Load the persisted conversation list once on startup.
   useEffect(() => {
-    void useChatStore.getState().init();
+    void (async () => {
+      // Task loading performs the one-time legacy migration, which can create
+      // projects from previously picked workspaces. Load projects afterwards.
+      await useChatStore.getState().init();
+      await useProjectStore.getState().init();
+    })();
   }, []);
 
   return (
@@ -35,7 +40,6 @@ export default function App() {
           <span className="truncate text-sm font-medium">{title}</span>
           <div className="ml-auto flex items-center gap-1.5">
             <AgentSelect />
-            <WorkspaceIndicator />
           </div>
         </header>
         <div className="min-h-0 flex-1">

@@ -83,6 +83,8 @@ export function installTauriMock(): void {
       ],
       chatProviderId: "p-terln",
       chatModel: "gpt-5.5",
+      titleProviderId: "",
+      titleModel: "",
       asrProviderId: "p-mimo",
       asrModel: "mimo-v2.5-asr",
       polishProviderId: "p-terln",
@@ -129,6 +131,22 @@ export function installTauriMock(): void {
     ]),
     keys: { "p-terln": "sk-REDACTED", "p-mimo": "sk-REDACTED" } as
       Record<string, string>,
+    projects: [
+      {
+        id: "project-orbit",
+        name: "Orbit",
+        rootPath: "/Users/demo/Projects/Orbit",
+        createdAt: Date.now() - 86_400_000,
+        lastOpenedAt: Date.now(),
+      },
+      {
+        id: "project-autobot",
+        name: "autobot",
+        rootPath: "/Users/demo/Projects/autobot",
+        createdAt: Date.now() - 172_800_000,
+        lastOpenedAt: Date.now() - 3_600_000,
+      },
+    ] as Record<string, unknown>[],
     conversations: new Map<string, Record<string, unknown>>(),
     cancelled: new Set<number>(),
   };
@@ -137,13 +155,27 @@ export function installTauriMock(): void {
     callbacks.get(channel.id)?.({ index, ...payload });
 
   /** Stream `reply` character by character over a tauri Channel. */
-  const stream = async (requestId: number, channel: MockChannel, reply: string) => {
+  const stream = async (
+    requestId: number,
+    channel: MockChannel,
+    reply: string,
+    model = "mock-model",
+  ) => {
     let i = 0;
+    push(channel, i++, { message: { type: "started", model } });
     for (const ch of reply) {
       if (state.cancelled.has(requestId)) break;
       push(channel, i++, { message: { type: "delta", content: ch } });
       await sleep(12);
     }
+    push(channel, i++, {
+      message: {
+        type: "usage",
+        promptTokens: 28,
+        completionTokens: Math.ceil(reply.length / 3),
+        totalTokens: 28 + Math.ceil(reply.length / 3),
+      },
+    });
     push(channel, i++, {
       message: { type: "done", cancelled: state.cancelled.has(requestId) },
     });
@@ -152,9 +184,14 @@ export function installTauriMock(): void {
   };
 
   /** Scripted agent turn: text → tool call → permission ask → result → text. */
-  const streamAgentDemo = async (requestId: number, channel: MockChannel) => {
+  const streamAgentDemo = async (
+    requestId: number,
+    channel: MockChannel,
+    model = "mock-model",
+  ) => {
     let i = 0;
     const emit = (message: Record<string, unknown>) => push(channel, i++, { message });
+    emit({ type: "started", model });
     for (const ch of "我来读取一下文件。") {
       emit({ type: "delta", content: ch });
       await sleep(20);
@@ -187,7 +224,44 @@ export function installTauriMock(): void {
       emit({ type: "delta", content: ch });
       await sleep(20);
     }
+    emit({ type: "usage", promptTokens: 96, completionTokens: 31, totalTokens: 127 });
     emit({ type: "done", cancelled: state.cancelled.has(requestId) });
+    push(channel, i, { end: true });
+    state.cancelled.delete(requestId);
+  };
+  const streamRetryDemo = async (
+    requestId: number,
+    channel: MockChannel,
+    model = "mock-model",
+  ) => {
+    let i = 0;
+    const emit = (message: Record<string, unknown>) => push(channel, i++, { message });
+    emit({ type: "started", model });
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      if (state.cancelled.has(requestId)) break;
+      emit({
+        type: "retrying",
+        attempt,
+        maxRetries: 5,
+        delayMs: 800,
+        reason: "服务暂时不可用（503）",
+      });
+      await sleep(500);
+    }
+    if (state.cancelled.has(requestId)) {
+      emit({ type: "done", cancelled: true });
+    } else {
+      emit({
+        type: "error",
+        message: "模型服务暂时不可用",
+        detail:
+          '模型服务返回 HTTP 503\n\n{\n  "error": {\n    "code": "do_request_failed",\n    "message": "所有节点均失败：上游服务暂时不可用"\n  }\n}',
+        code: "do_request_failed",
+        status: 503,
+        retryable: true,
+        retries: 5,
+      });
+    }
     push(channel, i, { end: true });
     state.cancelled.delete(requestId);
   };
@@ -251,6 +325,42 @@ export function installTauriMock(): void {
     mcp_restart_server: () => {},
     mcp_stop_server: () => {},
     pick_workspace_dir: () => "/Users/demo/Projects/example",
+    list_projects: () =>
+      structuredClone(state.projects).sort(
+        (a, b) => (b.lastOpenedAt as number) - (a.lastOpenedAt as number),
+      ),
+    add_project: (a) => {
+      const path = a.path as string;
+      const existing = state.projects.find((project) => project.rootPath === path);
+      if (existing) {
+        existing.lastOpenedAt = Date.now();
+        return structuredClone(existing);
+      }
+      const project = {
+        id: crypto.randomUUID(),
+        name: path.split(/[\\/]/).filter(Boolean).pop() ?? "项目",
+        rootPath: path,
+        createdAt: Date.now(),
+        lastOpenedAt: Date.now(),
+      };
+      state.projects.unshift(project);
+      return structuredClone(project);
+    },
+    touch_project: (a) => {
+      const project = state.projects.find((item) => item.id === a.id);
+      if (!project) throw "项目不存在或已被移除";
+      project.lastOpenedAt = Date.now();
+      return structuredClone(project);
+    },
+    rename_project: (a) => {
+      const project = state.projects.find((item) => item.id === a.id);
+      if (!project) throw "项目不存在或已被移除";
+      const name = String(a.name).trim();
+      if (!name) throw "项目名称不能为空";
+      project.name = name;
+      return structuredClone(project);
+    },
+    reveal_project: () => {},
     permission_respond: (a) => {
       pendingPermission = a.decision as string;
     },
@@ -283,10 +393,29 @@ export function installTauriMock(): void {
     chat_stream: (a) => {
       const messages = a.messages as { content: string }[];
       const last = messages[messages.length - 1]?.content ?? "";
+      if (last.includes("标题生成测试")) {
+        return stream(
+          a.requestId as number,
+          a.onEvent as MockChannel,
+          "标题已经生成。",
+          a.model as string,
+        );
+      }
+      if (last.includes("错误重试")) {
+        return streamRetryDemo(
+          a.requestId as number,
+          a.onEvent as MockChannel,
+          a.model as string,
+        );
+      }
       // "工具" in the prompt exercises the agent-loop events (tool cards +
       // permission prompt) without a real model.
       if (last.includes("工具")) {
-        return streamAgentDemo(a.requestId as number, a.onEvent as MockChannel);
+        return streamAgentDemo(
+          a.requestId as number,
+          a.onEvent as MockChannel,
+          a.model as string,
+        );
       }
       // Markdown-shaped so the renderer (headings / lists / tables / fenced
       // code) can be exercised without a real model.
@@ -311,11 +440,16 @@ public class Hello {
 | mimo-v2.5-asr | 语音识别 |
 
 > 引用：以上由 mock ${a.model} 生成。`;
-      return stream(a.requestId as number, a.onEvent as MockChannel, reply);
+      return stream(a.requestId as number, a.onEvent as MockChannel, reply, a.model as string);
     },
     chat_cancel: (a) => state.cancelled.add(a.requestId as number),
     polish_stream: (a) =>
-      stream(a.requestId as number, a.onEvent as MockChannel, `（润色）${a.transcript}`),
+      stream(
+        a.requestId as number,
+        a.onEvent as MockChannel,
+        `（润色）${a.transcript}`,
+        a.model as string,
+      ),
 
     transcribe: () => "这是一段模拟的语音识别结果。",
     deliver_text: () => ({ inserted: false, needsAccessibility: false }),
@@ -334,16 +468,86 @@ public class Hello {
 
     list_conversations: () =>
       [...state.conversations.values()]
-        .map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt }))
+        .filter((c) => !c.archivedAt)
+        .map((c) => ({
+          id: c.id,
+          title: c.title,
+          updatedAt: c.updatedAt,
+          projectId: c.projectId ?? "",
+          archivedAt: 0,
+          pinnedAt: c.pinnedAt ?? 0,
+        }))
         .sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number)),
+    list_archived_conversations: () =>
+      [...state.conversations.values()]
+        .filter((c) => Boolean(c.archivedAt))
+        .map((c) => ({
+          id: c.id,
+          title: c.title,
+          updatedAt: c.updatedAt,
+          projectId: c.projectId ?? "",
+          archivedAt: c.archivedAt,
+          pinnedAt: c.pinnedAt ?? 0,
+        }))
+        .sort((a, b) => (b.archivedAt as number) - (a.archivedAt as number)),
     load_conversation: (a) => structuredClone(state.conversations.get(a.id as string)),
     save_conversation: (a) => {
-      const conv = structuredClone(a.conversation as { id: string });
+      const conv = structuredClone(a.conversation as { id: string; title: string });
+      const existing = state.conversations.get(conv.id);
       const updatedAt = Date.now();
-      state.conversations.set(conv.id, { ...conv, updatedAt });
-      return updatedAt;
+      const existingTitle = existing?.title as string | undefined;
+      const title =
+        conv.title === "新会话" && existingTitle && existingTitle !== "新会话"
+          ? existingTitle
+          : conv.title;
+      state.conversations.set(conv.id, {
+        ...conv,
+        title,
+        updatedAt,
+        archivedAt: existing?.archivedAt ?? 0,
+        pinnedAt: existing?.pinnedAt ?? 0,
+      });
+      return { updatedAt, title };
+    },
+    generate_conversation_title: async (a) => {
+      await sleep(350);
+      const conversation = state.conversations.get(a.id as string);
+      if (!conversation || conversation.title !== "新会话" || conversation.archivedAt) {
+        return null;
+      }
+      const firstUser = String(a.userMessage ?? "");
+      const title = firstUser.includes("标题生成") ? "配置 AI 会话标题" : "AI 生成的会话标题";
+      conversation.title = title;
+      return title;
     },
     delete_conversation: (a) => state.conversations.delete(a.id as string),
+    archive_conversation: (a) => {
+      const conversation = state.conversations.get(a.id as string);
+      if (!conversation) throw "任务不存在";
+      conversation.archivedAt = Date.now();
+    },
+    restore_conversation: (a) => {
+      const conversation = state.conversations.get(a.id as string);
+      if (!conversation) throw "任务不存在";
+      conversation.archivedAt = 0;
+    },
+    set_conversation_pinned: (a) => {
+      const conversation = state.conversations.get(a.id as string);
+      if (!conversation) throw "任务不存在";
+      const pinnedAt = a.pinned ? Date.now() : 0;
+      conversation.pinnedAt = pinnedAt;
+      return pinnedAt;
+    },
+    archive_project_conversations: (a) => {
+      let count = 0;
+      for (const conversation of state.conversations.values()) {
+        if (conversation.projectId === a.projectId && !conversation.archivedAt) {
+          conversation.archivedAt = Date.now();
+          count += 1;
+        }
+      }
+      return count;
+    },
 
     "plugin:app|version": () => "0.0.0-mock",
     "plugin:event|listen": () => 0,

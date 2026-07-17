@@ -56,7 +56,11 @@ pub fn parse_frontmatter(content: &str) -> (Option<String>, Option<String>) {
         let Some((key, value)) = trimmed.split_once(':') else {
             continue;
         };
-        let value = value.trim().trim_matches('"').trim_matches('\'').to_string();
+        let value = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
         match key.trim() {
             "name" => name = Some(value),
             "description" => description = Some(value),

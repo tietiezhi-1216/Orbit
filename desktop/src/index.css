@@ -128,3 +128,85 @@
     @apply font-sans;
     }
 }
+
+/* Capsule chat (Orbit pill): registered angle so the conic edge-glow can spin. */
+@property --capsule-glow-angle {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+}
+
+@theme {
+    --animate-capsule-sweep: capsule-sweep 1.6s linear infinite;
+    --animate-capsule-glow: capsule-glow 2.4s linear infinite;
+    --animate-capsule-label-sweep: capsule-label-sweep 1.2s linear infinite;
+
+    @keyframes capsule-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(340%); }
+    }
+    @keyframes capsule-glow {
+        from { --capsule-glow-angle: 0deg; }
+        to { --capsule-glow-angle: 360deg; }
+    }
+    @keyframes capsule-label-sweep {
+        from { mask-position: -160% 0; }
+        to { mask-position: 260% 0; }
+    }
+}
+
+/* highlight.js token colours for markdown code blocks (rehype-highlight).
+   Kept here rather than pulling a vendor theme so they follow the app palette
+   and adapt to light/dark on their own. */
+@layer components {
+    .hljs-comment,
+    .hljs-quote {
+        @apply text-muted-foreground italic;
+    }
+    .hljs-keyword,
+    .hljs-selector-tag,
+    .hljs-literal,
+    .hljs-doctag {
+        @apply text-purple-600 dark:text-purple-400;
+    }
+    .hljs-string,
+    .hljs-regexp,
+    .hljs-addition,
+    .hljs-meta-string {
+        @apply text-emerald-600 dark:text-emerald-400;
+    }
+    .hljs-number,
+    .hljs-symbol,
+    .hljs-bullet,
+    .hljs-variable,
+    .hljs-template-variable {
+        @apply text-amber-600 dark:text-amber-400;
+    }
+    .hljs-title,
+    .hljs-section,
+    .hljs-name,
+    .hljs-selector-id,
+    .hljs-selector-class {
+        @apply text-blue-600 dark:text-blue-400;
+    }
+    .hljs-attr,
+    .hljs-attribute,
+    .hljs-built_in,
+    .hljs-type,
+    .hljs-class .hljs-title {
+        @apply text-sky-700 dark:text-sky-300;
+    }
+    .hljs-meta,
+    .hljs-tag {
+        @apply text-muted-foreground;
+    }
+    .hljs-deletion {
+        @apply text-red-600 dark:text-red-400;
+    }
+    .hljs-emphasis {
+        @apply italic;
+    }
+    .hljs-strong {
+        @apply font-semibold;
+    }
+}

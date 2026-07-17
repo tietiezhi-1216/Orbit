@@ -1,6 +1,6 @@
 [package]
 name = "tietiezhi-desktop"
-version = "0.0.0"
+version = "0.1.0"
 description = "铁铁汁 —— AI 中转站官方桌面客户端"
 edition = "2021"
 
@@ -13,16 +13,44 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # rustls avoids the OpenSSL toolchain dependency on Windows CI runners.
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["macros", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "sync", "time", "process", "io-util", "fs"] }
 tokio-util = "0.7"
+tauri-plugin-dialog = "2.7.1"
+# Official Model Context Protocol Rust SDK; types are isolated inside src/mcp/.
+rmcp = { version = "2.2.0", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+# rmcp is on reqwest 0.13 while the app is on 0.12; alias the newer one just
+# for constructing the MCP HTTP transport client.
+reqwest13 = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"] }
+http = "1"
+regex = "1"
+globset = "0.4"
+walkdir = "2"
+uuid = { version = "1", features = ["v4"] }
+dunce = "1.0.5"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
+base64 = "0.22.1"
+arboard = "3.6.1"
+tauri-plugin-window-state = "2.4.1"
+dirs = "6.0.0"
+tauri-plugin-global-shortcut = "2.3.2"
 
 [dev-dependencies]
 # The SSE integration test runs a raw TCP mock relay.
 tokio = { version = "1", features = ["net", "io-util", "rt", "macros"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+core-graphics = "0.25.0"

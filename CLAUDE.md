@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **禁止手写 style**——不允许内联 `style={}`、不允许新建 `.css` / `.scss` 文件（全局 `desktop/src/index.css` 中的 Tailwind 指令和 shadcn 主题变量除外）。所有样式必须通过 Tailwind 类名表达；确需动态样式时用 `cva` / `cn()` 组合类名。未经明确允许不得违反本条。
 3. **组件一律用 shadcn/ui 现有组件组合实现**——shadcn 没有的先用其原语（Radix）组合，不引入其它 UI 库。添加组件：`pnpm dlx shadcn@latest add <name>`（本工程为 radix 基座 + nova 预设，见 `components.json`）。
 4. **TypeScript 严格模式，禁止 `any`**——确实无法避免时用 `unknown` + 类型收窄。
-5. **重逻辑下沉到 Rust command**——网络请求（含签名）、文件、密钥存储等在 `desktop/src-tauri/src/` 实现，前端只做展示与交互。**API Key 用系统安全存储（keyring）**，不得明文落盘、不得回传给前端展示。
+5. **重逻辑下沉到 Rust command**——网络请求（含签名）、文件、密钥存储等在 `desktop/src-tauri/src/` 实现，前端只做展示与交互。**API Key 用系统安全存储（keyring），不得明文落盘**（dev 构建例外，见下）。用户自己保存的 Key 在设置里默认掩码显示、可用眼睛切换成明文，但**编译进二进制的内置默认 Key 永不回传前端**。
 6. **兼容性按 Safari（WKWebView）基线开发**——使用新 CSS/JS 特性前先确认 WKWebView 支持。browserslist（`desktop/package.json`）= `Chrome >= 111 / Safari >= 16.4`，经 `browserslist-to-esbuild` 接到 Vite 的 `build.target`。macOS 最低 **13.3**（= Safari 16.4，Tailwind v4 的硬底线）；Windows 用 evergreen WebView2（打包配置了 `downloadBootstrapper` 引导安装）。
 7. **优先用主流方案**——状态管理 zustand（轻量优先）、数据请求 TanStack Query、构建 Vite、包管理统一 **pnpm**。能用现有抽象就不要自造轮子。
 
@@ -32,7 +32,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pnpm install                 # 装依赖
-pnpm tauri dev               # 开发调试（启动 Vite + Rust 应用窗口）
+pnpm tauri dev               # 开发调试（启动 Vite + Rust 应用窗口）——占用端口 1420
+pnpm dev:mock                # 纯浏览器跑 UI（端口 1421），配合 http://localhost:1421/?mock=1
 pnpm tauri build             # 打包发布产物（dmg / nsis）
 pnpm typecheck               # TypeScript 检查（tsc --noEmit）
 pnpm build                   # 前端产物（tsc --noEmit && vite build）
@@ -43,12 +44,18 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 
 ## desktop/ 架构
 
+### 开发调试
+
+- **`pnpm tauri dev` 独占端口 1420**（vite `strictPort: true`）。**绝不要 kill 1420 上的进程**——那是 tauri dev 的 `beforeDevCommand`，杀掉会让 app 窗口还在但白屏（`beforeDevCommand terminated with a non-zero status code`）。
+- 要在**普通浏览器**里验证 UI（无需 Rust 侧），用 `pnpm dev:mock`（端口 **1421**）+ `?mock=1`：`src/dev/tauri-mock.ts` 会 stub `window.__TAURI_INTERNALS__`。入口在 `import.meta.env.DEV && ?mock` 时才动态 import 它，**正式构建会被 tree-shake，产物零残留**。不要再往 `index.html` 注入 mock 脚本。
+- 前端改动走 Vite HMR 秒生效；**改 `src-tauri/**.rs` 会触发重新编译并重启整个 app**（无 HMR）。
+
 ### 前端（`desktop/src/`）
 
 - **`components/ui/`** —— shadcn 生成的组件，原则上不手改（升级用 CLI 重拉）。
-- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏导航）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
-- **`features/`** —— 按功能分模块：`chat/`（聊天）、`providers/`（接入配置）、`settings/`（设置）。
-- **`stores/`** —— zustand：`ui.ts`（当前页面，**无路由库**，三页用状态切换）。
+- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏：新对话 + 会话记录列表 + 左下角设置入口）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
+- **`features/`** —— 按功能分模块：`chat/`（聊天页 + 顶栏模型选择器 `model-select.tsx`）、`settings/`（设置页，含中转站接入配置/外观/关于）。
+- **`stores/`** —— zustand：`ui.ts`（当前页面，**无路由库**，chat/settings 两页用状态切换）、`chat.ts`（会话列表 + 当前消息 + 流式发送；会话文件读写经模块级串行队列防乱序）。
 - **`lib/`** —— `utils.ts`（`cn()`）等工具与 API 封装。
 - 应用标识：产品名 `Tietiezhi`，identifier `com.tietiezhi.tietiezhi`，窗口标题「铁铁汁」。
 
@@ -56,7 +63,10 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 
 - `src/main.rs` 只是入口；逻辑在 `src/lib.rs`（`run()`）。
 - commands 按域拆分在 `src/commands/`；密钥存取封装在 `src/secrets.rs`（keyring，service = `com.tietiezhi.tietiezhi`）。
+- **Agent 体系**（2026-07-16）：`src/agent/`（工具调用环路 `loop_.rs`、事件 `events.rs`、默认系统提示词 `prompt.rs`）、`src/tools/`（内置工具 read_file/write_file/edit_file/list_dir/glob/grep/bash/fetch/skill，路径 jail 限制在会话工作区内）、`src/permission/`（三模式 ask/auto/full，PermissionBroker oneshot 阻塞等前端 `permission_respond`）、`src/skills/`（`app_data_dir()/skills/{name}/SKILL.md`，Anthropic 规范）、`src/mcp/`（基于官方 rmcp SDK 的 stdio + streamable HTTP 客户端，配置存 settings，工具名 `mcp__{server}__{tool}`）。智能体档案存 `app_config_dir()/agents.json`（提示词/模型覆盖/skills/MCP/工具/权限模式）；会话工作区=用户选的文件夹或 `app_data_dir()/workspaces/{conversation_id}` 虚拟目录。注意 rmcp 依赖 reqwest 0.13，与主工程 0.12 并存（Cargo.toml 里别名 `reqwest13`）。
+- **内置默认配置**在 `src/defaults.rs`：`DEFAULT_BASE_URL` / `DEFAULT_API_KEY` 编译进二进制（**发布前需填入官方中转站真实值**，默认 key 永不回传前端）；生效优先级=用户设置（settings.json / keyring）> 内置默认。请求类命令（聊天/模型列表）在 Rust 侧解析生效配置，前端不回传连接信息。
 - 设置（baseURL、默认模型等非敏感项）以 JSON 存 `app_config_dir()/settings.json`；**API Key 只进钥匙串**。
+- **会话记录**在 `src/commands/conversations.rs`：每会话一个 JSON 文件存 `app_data_dir()/conversations/{uuid}.json`，id 由前端 `crypto.randomUUID()` 生成、Rust 校验（仅字母数字与 `-`，防路径穿越），`updated_at` 由 Rust 落盘时生成。
 - baseURL 归一化：用户填 `https://x.com` 或 `https://x.com/v1` 都可以，Rust 侧统一补 `/v1` 前缀后拼端点。
 - 聊天走 OpenAI 兼容 `/v1/chat/completions`（`stream: true`），SSE 解析在 Rust 侧完成，经 `tauri::ipc::Channel` 把 `{type: delta|done|error}` 事件推给前端；解析器有 `cargo test` 单元测试。
 - 能力声明在 `capabilities/default.json`（当前仅 `core:default`）。新增系统能力时先想想是否真的需要新权限。
@@ -64,6 +74,7 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 ## CI
 
 - `.github/workflows/desktop.yml` —— Windows + macOS 双平台：typecheck + cargo check/test + `tauri build`。macOS 签名+公证已接入：配齐 `APPLE_*` secrets（证书 p12、签名身份、Apple ID、app 专用密码、Team ID）后 `tauri build` 自动签名/公证/装订；未配置则回退 ad-hoc。
+- **应用内自动更新**（tauri updater）已接入：更新产物（macOS `*.app.tar.gz`、Windows nsis exe）由 CI 用 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` secrets 签名（minisign 密钥对在开发机 `~/.tauri/tietiezhi-updater.*`，**注意 bundler 只认内容变量、不认 `_PATH` 变体**），`updater-manifest` job 生成 tauri 格式的 `updater-latest.json`。清单端点 `https://tietiezhi.xyz/updater/latest.json`（与根 `latest.json` 官网下载清单是两个文件、两种格式）。发版：bump `tauri.conf.json` 的 `version` → push → 把 CI artifacts 传到分发机 MinIO（`releases/<ver>/` + 覆盖 `updater/latest.json`）。
 - `.github/workflows/server-ci.yml` —— Go 服务端（保持原样）。
 
 ## 文档状态

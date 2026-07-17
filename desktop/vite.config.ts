@@ -24,5 +24,11 @@ export default defineConfig({
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
     target: browserslistToEsbuild(),
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        capsule: path.resolve(__dirname, "capsule.html"),
+      },
+    },
   },
 });

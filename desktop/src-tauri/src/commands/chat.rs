@@ -2,11 +2,13 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
-use super::{api_url, snippet};
-use crate::{secrets, AppState};
+use super::{api_url, providers, snippet};
+use crate::AppState;
+
+pub use crate::agent::events::ChatEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -14,25 +16,16 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-/// Events streamed to the frontend over a tauri IPC channel.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum ChatEvent {
-    Delta { content: String },
-    Done { cancelled: bool },
-    Error { message: String },
-}
-
 /// Incremental SSE line splitter: feed raw bytes, get complete lines back.
 /// Lines are only emitted once their trailing `\n` arrived, so multi-byte
 /// UTF-8 sequences split across network chunks are never broken.
 #[derive(Default)]
-struct SseLineBuffer {
+pub(crate) struct SseLineBuffer {
     buf: Vec<u8>,
 }
 
 impl SseLineBuffer {
-    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Vec<String> {
         self.buf.extend_from_slice(chunk);
         let mut lines = Vec::new();
         while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
@@ -48,7 +41,7 @@ impl SseLineBuffer {
 }
 
 /// Extract the payload of an SSE `data:` line; other fields are ignored.
-fn sse_data(line: &str) -> Option<&str> {
+pub(crate) fn sse_data(line: &str) -> Option<&str> {
     line.strip_prefix("data:").map(str::trim_start)
 }
 
@@ -70,14 +63,84 @@ struct StreamDelta {
     content: Option<String>,
 }
 
-/// Stream one OpenAI-compatible chat completion. Deltas are pushed through
-/// `on_event`; the command itself only fails on argument-level problems, so
-/// the frontend has a single place (the channel) to observe the outcome.
+/// Stream one OpenAI-compatible chat completion against the given provider.
+/// Connection details are resolved Rust-side from the provider id. Deltas are
+/// pushed through `on_event`; the command itself only fails on argument-level
+/// problems, so the frontend has a single place (the channel) to observe the
+/// outcome.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn chat_stream(
+    app: AppHandle,
     state: State<'_, AppState>,
     request_id: u32,
-    base_url: String,
+    provider_id: String,
+    model: String,
+    messages: Vec<ChatMessage>,
+    conversation_id: Option<String>,
+    agent_id: Option<String>,
+    workspace: Option<String>,
+    on_event: Channel<ChatEvent>,
+) -> Result<(), String> {
+    let cancel = CancellationToken::new();
+    state
+        .chat_cancels
+        .lock()
+        .unwrap()
+        .insert(request_id, cancel.clone());
+
+    let result = match providers::resolve(&app, &provider_id) {
+        Ok(resolved) => {
+            match super::agents::resolve_env(
+                &app,
+                agent_id.as_deref(),
+                workspace.as_deref(),
+                conversation_id.as_deref(),
+            ) {
+                Ok(env) => {
+                    // Per-agent model override beats the frontend selection.
+                    let model = super::agents::model_override(&app, agent_id.as_deref())
+                        .unwrap_or(model);
+                    crate::agent::loop_::run_agent_loop(
+                        &app,
+                        &state.http,
+                        &state.permissions,
+                        &state.mcp,
+                        request_id,
+                        &resolved.base_url,
+                        resolved.key.as_deref(),
+                        &model,
+                        messages,
+                        env,
+                        &cancel,
+                        &on_event,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    state.chat_cancels.lock().unwrap().remove(&request_id);
+    state.permissions.end_session(request_id);
+
+    let final_event = match result {
+        Ok(cancelled) => ChatEvent::Done { cancelled },
+        Err(message) => ChatEvent::Error { message },
+    };
+    let _ = on_event.send(final_event);
+    Ok(())
+}
+
+/// Shared streaming path used by both chat and dictation polish: resolve the
+/// provider, run the stream, and drive the outcome channel.
+pub(crate) async fn stream_to_channel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request_id: u32,
+    provider_id: String,
     model: String,
     messages: Vec<ChatMessage>,
     on_event: Channel<ChatEvent>,
@@ -89,14 +152,14 @@ pub async fn chat_stream(
         .unwrap()
         .insert(request_id, cancel.clone());
 
-    let result = match secrets::get_api_key() {
-        Ok(key) => {
+    let result = match providers::resolve(&app, &provider_id) {
+        Ok(resolved) => {
             run_stream(
                 &state.http,
-                &base_url,
+                &resolved.base_url,
                 &model,
                 &messages,
-                key.as_deref(),
+                resolved.key.as_deref(),
                 &cancel,
                 |content| {
                     on_event
@@ -139,10 +202,10 @@ async fn run_stream(
 ) -> Result<bool, String> {
     let base = base_url.trim();
     if base.is_empty() {
-        return Err("尚未配置中转站 baseURL，请先到「接入配置」填写".into());
+        return Err("尚未配置中转站 baseURL，请先到「设置」填写".into());
     }
     if model.trim().is_empty() {
-        return Err("尚未选择模型，请先到「接入配置」填写".into());
+        return Err("尚未选择模型，请先在顶部选择模型".into());
     }
 
     let body = json!({

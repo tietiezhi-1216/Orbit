@@ -1,11 +1,12 @@
 {
   "name": "tietiezhi-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "vite --port 1421",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -19,12 +20,18 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "lucide-react": "^1.24.0",
     "radix-ui": "^1.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "shadcn": "^4.13.0",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"

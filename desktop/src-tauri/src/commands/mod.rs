@@ -1,6 +1,17 @@
+pub mod agents;
+pub mod capsule;
 pub mod chat;
-pub mod connection;
+pub mod conversations;
+pub mod dictation;
+pub mod hotkey;
+pub mod mcp;
+pub mod models;
+pub mod permissions;
+pub mod providers;
 pub mod settings;
+pub mod skills;
+pub mod text_insert;
+pub mod workspace;
 
 /// Join a user-supplied base URL with an API path, normalizing the common
 /// "/v1 or not" ambiguity: both `https://x.com` and `https://x.com/v1` work.

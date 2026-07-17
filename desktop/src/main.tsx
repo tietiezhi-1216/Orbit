@@ -8,14 +8,24 @@ import "@/index.css";
 
 const queryClient = new QueryClient();
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <App />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
-  </React.StrictMode>,
-);
+/** `?mock` (dev only) stubs the Tauri bridge so the UI runs in a plain browser. */
+async function bootstrap() {
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has("mock")) {
+    const { installTauriMock } = await import("@/dev/tauri-mock");
+    installTauriMock();
+  }
+
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <App />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </React.StrictMode>,
+  );
+}
+
+void bootstrap();

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
@@ -5,36 +6,44 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AgentsDialog } from "@/features/agents/agents-dialog";
+import { AgentSelect } from "@/features/chat/agent-select";
 import { ChatPage } from "@/features/chat/chat-page";
-import { ProvidersPage } from "@/features/providers/providers-page";
-import { SettingsPage } from "@/features/settings/settings-page";
+import { WorkspaceIndicator } from "@/features/chat/workspace-indicator";
+import { SettingsDialog } from "@/features/settings/settings-dialog";
+import { useChatStore } from "@/stores/chat";
 import { useUiStore } from "@/stores/ui";
-import type { Page } from "@/stores/ui";
-
-const PAGE_TITLES: Record<Page, string> = {
-  chat: "聊天",
-  providers: "接入配置",
-  settings: "设置",
-};
 
 export default function App() {
-  const page = useUiStore((s) => s.page);
+  const activeId = useChatStore((s) => s.activeId);
+  const conversations = useChatStore((s) => s.conversations);
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+  const title = conversations.find((c) => c.id === activeId)?.title ?? "新对话";
+
+  // Load the persisted conversation list once on startup.
+  useEffect(() => {
+    void useChatStore.getState().init();
+  }, []);
 
   return (
-    <SidebarProvider>
+    <SidebarProvider width={`${sidebarWidth}px`}>
       <AppSidebar />
       <SidebarInset className="h-svh overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 h-4!" />
-          <span className="text-sm font-medium">{PAGE_TITLES[page]}</span>
+          <span className="truncate text-sm font-medium">{title}</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <AgentSelect />
+            <WorkspaceIndicator />
+          </div>
         </header>
         <div className="min-h-0 flex-1">
-          {page === "chat" && <ChatPage />}
-          {page === "providers" && <ProvidersPage />}
-          {page === "settings" && <SettingsPage />}
+          <ChatPage />
         </div>
       </SidebarInset>
+      <SettingsDialog />
+      <AgentsDialog />
     </SidebarProvider>
   );
 }

@@ -4,14 +4,47 @@
     {
       "name": "desktop-web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "desktop", "dev"],
+      "runtimeArgs": [
+        "--dir",
+        "desktop",
+        "dev"
+      ],
       "port": 1420
+    },
+    {
+      "name": "desktop-mock",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "desktop",
+        "dev:mock"
+      ],
+      "port": 1421
     },
     {
       "name": "website",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8000", "--directory", "website/public"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8000",
+        "--directory",
+        "website/public"
+      ],
       "port": 8000
+    },
+    {
+      "name": "desktop-mock-2",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "desktop",
+        "exec",
+        "vite",
+        "--port",
+        "1423"
+      ],
+      "port": 1423
     }
   ]
 }

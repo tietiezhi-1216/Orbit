@@ -36,11 +36,27 @@ module.exports = {
           },
         },
         "title-shine": {
-          "0%": {
-            clipPath: "polygon(-30% 0, -8% 0, -20% 100%, -42% 100%)",
+          "0%, 16%": {
+            backgroundPosition: "145% 50%",
           },
-          "100%": {
-            clipPath: "polygon(142% 0, 164% 0, 152% 100%, 130% 100%)",
+          "54%, 100%": {
+            backgroundPosition: "-55% 50%",
+          },
+        },
+        "title-beam": {
+          "0%, 16%": {
+            opacity: "0",
+            transform: "translate3d(-140%, 0, 0) skewX(-8deg)",
+          },
+          "24%": {
+            opacity: ".08",
+          },
+          "38%": {
+            opacity: ".16",
+          },
+          "54%, 100%": {
+            opacity: "0",
+            transform: "translate3d(820%, 0, 0) skewX(-8deg)",
           },
         },
         "star-drift": {
@@ -81,7 +97,8 @@ module.exports = {
       },
       animation: {
         "fade-in-down": "fade-in-down 0.5s ease-out",
-        "title-shine": "title-shine 3.2s ease-in-out infinite",
+        "title-shine": "title-shine 5.2s linear infinite",
+        "title-beam": "title-beam 5.2s linear infinite",
         "star-drift": "star-drift 18s ease-in-out infinite alternate",
         "star-drift-reverse": "star-drift-reverse 24s ease-in-out infinite alternate",
         "page-sweep": "page-sweep 8s ease-in-out infinite",

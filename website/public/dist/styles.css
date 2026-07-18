@@ -532,6 +532,14 @@ video {
 .inset-0{
   inset: 0px;
 }
+.-inset-x-3{
+  left: -0.75rem;
+  right: -0.75rem;
+}
+.-inset-y-1{
+  top: -0.25rem;
+  bottom: -0.25rem;
+}
 .inset-y-0{
   top: 0px;
   bottom: 0px;
@@ -545,8 +553,14 @@ video {
 .left-1\/2{
   left: 50%;
 }
+.z-0{
+  z-index: 0;
+}
 .z-10{
   z-index: 10;
+}
+.z-20{
+  z-index: 20;
 }
 .z-\[2\]{
   z-index: 2;
@@ -605,6 +619,9 @@ video {
 }
 .w-12{
   width: 3rem;
+}
+.w-16{
+  width: 4rem;
 }
 .w-5{
   width: 1.25rem;
@@ -681,6 +698,9 @@ video {
 .rounded-full{
   border-radius: 9999px;
 }
+.rounded-lg{
+  border-radius: 0.5rem;
+}
 .rounded-xl{
   border-radius: 0.75rem;
 }
@@ -706,6 +726,9 @@ video {
 .bg-white\/\[\.08\]{
   background-color: rgb(255 255 255 / .08);
 }
+.bg-\[linear-gradient\(105deg\2c transparent_0\%\2c transparent_44\%\2c \#168ca8_46\%\2c \#6ee7ff_48\.5\%\2c \#ffffff_50\.5\%\2c \#c7b7ff_52\.5\%\2c \#7857e6_55\%\2c transparent_57\%\2c transparent_100\%\)\]{
+  background-image: linear-gradient(105deg,transparent 0%,transparent 44%,#168ca8 46%,#6ee7ff 48.5%,#ffffff 50.5%,#c7b7ff 52.5%,#7857e6 55%,transparent 57%,transparent 100%);
+}
 .bg-gradient-to-b{
   background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
 }
@@ -722,6 +745,13 @@ video {
 }
 .bg-100\%{
   background-size: 100%;
+}
+.bg-\[length\:220\%_100\%\]{
+  background-size: 220% 100%;
+}
+.bg-clip-text{
+  -webkit-background-clip: text;
+          background-clip: text;
 }
 .bg-left-bottom{
   background-position: left bottom;
@@ -824,10 +854,6 @@ video {
 .tracking-\[\.3em\]{
   letter-spacing: .3em;
 }
-.text-\[\#17243a\]{
-  --tw-text-opacity: 1;
-  color: rgb(23 36 58 / var(--tw-text-opacity, 1));
-}
 .text-white{
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity, 1));
@@ -867,16 +893,20 @@ video {
   --tw-shadow-colored: inset 0 1px 0 var(--tw-shadow-color), 0 22px 60px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
+.blur-\[3px\]{
+  --tw-blur: blur(3px);
+  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
+}
+.drop-shadow-\[0_0_8px_rgba\(110\2c 231\2c 255\2c \.25\)\]{
+  --tw-drop-shadow: drop-shadow(0 0 8px rgba(110,231,255,.25));
+  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
+}
 .drop-shadow-\[0_10px_36px_rgba\(0\2c 0\2c 0\2c \.7\)\]{
   --tw-drop-shadow: drop-shadow(0 10px 36px rgba(0,0,0,.7));
   filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
 .drop-shadow-\[0_8px_24px_rgba\(77\2c 221\2c 255\2c \.25\)\]{
   --tw-drop-shadow: drop-shadow(0 8px 24px rgba(77,221,255,.25));
-  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
-}
-.drop-shadow-\[10px_0_12px_rgba\(125\2c 229\2c 255\2c \.55\)\]{
-  --tw-drop-shadow: drop-shadow(10px 0 12px rgba(125,229,255,.55));
   filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
 .invert{
@@ -1029,19 +1059,44 @@ video {
     animation: star-drift-reverse 24s ease-in-out infinite alternate;
   }
 
-  @keyframes title-shine{
+  @keyframes title-beam{
 
-    0%{
-      clip-path: polygon(-30% 0, -8% 0, -20% 100%, -42% 100%);
+    0%, 16%{
+      opacity: 0;
+      transform: translate3d(-140%, 0, 0) skewX(-8deg);
     }
 
-    100%{
-      clip-path: polygon(142% 0, 164% 0, 152% 100%, 130% 100%);
+    24%{
+      opacity: .08;
+    }
+
+    38%{
+      opacity: .16;
+    }
+
+    54%, 100%{
+      opacity: 0;
+      transform: translate3d(820%, 0, 0) skewX(-8deg);
+    }
+  }
+
+  .motion-safe\:animate-title-beam{
+    animation: title-beam 5.2s linear infinite;
+  }
+
+  @keyframes title-shine{
+
+    0%, 16%{
+      background-position: 145% 50%;
+    }
+
+    54%, 100%{
+      background-position: -55% 50%;
     }
   }
 
   .motion-safe\:animate-title-shine{
-    animation: title-shine 3.2s ease-in-out infinite;
+    animation: title-shine 5.2s linear infinite;
   }
 }
 @media (prefers-reduced-motion: reduce){
@@ -1091,6 +1146,10 @@ video {
 
   .md\:w-14{
     width: 3.5rem;
+  }
+
+  .md\:w-24{
+    width: 6rem;
   }
 
   .md\:w-96{

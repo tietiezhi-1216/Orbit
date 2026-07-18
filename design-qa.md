@@ -1,59 +1,46 @@
-# Design QA — Tietiezhi Download Glass Cards and Text Sweep
+# Design QA — Tietiezhi Desktop 标题扫光优化
 
-- source visual truth: `/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/focus-home/before-download-glass-shine.png`
-- implementation desktop: `/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/focus-home/final-download-glass-desktop.png`
-- implementation mobile: `/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/focus-home/final-download-glass-mobile.png`
-- full-view comparison: `/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/focus-home/compare-download-glass-shine.png`
-- viewports: 1280 × 720 desktop; 390 × 844 mobile
-- state: GitHub `v0.0.1` data loaded; dark text sweep, page sweep, and star drift active
+- 用户反馈截图：`/var/folders/dh/4xyy8_s111dfpk0msplz51_h0000gn/T/codex-clipboard-c6b17eeb-04cc-4d72-aa18-47f83229fbda.png`
+- 桌面端实现：`/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/release-polish/final-shine-desktop.png`
+- 移动端实现：`/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/release-polish/final-shine-mobile.png`
+- 标题区域裁图：`/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/release-polish/final-shine-title-crop.png`
+- 前后对照：`/Users/tietiezhi/.codex/visualizations/2026/07/18/019f74a2-91b9-79b2-8054-98d9b589d2b7/release-polish/compare-title-sweep-before-after.png`
+- 验证视口：1280 × 720；390 × 844
+- 验证版本：v0.0.1
 
-## Full-view comparison evidence
+## 视觉结论
 
-The side-by-side comparison preserves the selected single-screen hero, title scale, mascot crop, and minimal copy. The shared two-segment dock is replaced by two clearly isolated glass cards with equal visual weight, a 16 px desktop gap, and platform-specific icon tiles.
+原效果的深色大面积斜切层破坏了标题字形，静止帧会像标题被挖掉一块。新效果保留完整白色标题，只让一条窄幅青白紫高光穿过字面；外围光束被裁切在标题附近，透明度控制在 0.16 以下，不再出现黑色块面。
 
-## Focused region comparison evidence
+## 关键设计面
 
-No extra crop is needed because the 1280 × 720 comparison clearly shows the complete title and download region. Motion sampling captured the title clip path at three distinct positions: approximately -14%, 43%, and 108%, visibly moving the dark-blue diagonal highlight across the solid-white title.
+- 字体与层级：标题字号、字重、字距和换行均保持不变，底层白字始终完整可读。
+- 光效：扫光使用窄幅羽化渐变，周期从 3.2 秒调整为 5.2 秒并改为匀速，避免突然切入。
+- 色彩：沿用页面现有青蓝、冷白、浅紫光谱，不新增突兀色块。
+- 布局：下载卡片、平台图标、星空、页面扫光和正文位置均未改动。
+- 可访问性：光效层保持 `aria-hidden`；系统启用减少动态效果时不播放动画。
 
-## Required fidelity surfaces
+## 对照与修复历史
 
-- Fonts and typography: the base `Tietiezhi Desktop` heading remains solid white and unchanged in size, weight, tracking, and wrapping. A separate aria-hidden dark-blue sweep crosses the glyphs without changing the accessible heading.
-- Spacing and layout rhythm: the two download cards are independent, equal-width 328 px controls on desktop and stacked 350 × 80 px controls on mobile. Both layouts retain balanced bottom margins and no horizontal overflow.
-- Colors and visual tokens: the new cards use 8% white glass, 20% white borders, 40 px backdrop blur, and restrained internal highlights consistent with the dark blue-violet hero.
-- Image quality and asset fidelity: Apple and Windows 11 marks are local Simple Icons assets, rendered sharply at 20 px. Existing generated mascot, starfield, and page sweep assets retain their native crop and clarity.
-- Copy and content: the minimal homepage copy is unchanged. Each download now adds only a compact format label (`Universal DMG` / `Windows x64`) and platform name.
+- [P1] 原深蓝斜切多边形覆盖标题中心，破坏 `Tietiezhi` 字形完整性。
+- 修复：删除深色文字裁切层，改为独立白字底层 + 窄幅渐变文字层 + 低透明度位图光束。
+- 复核：组合对照图显示标题不再被切断，动画采样时 `background-position` 为 57.15%，且持续移动。
 
-## Findings
+## 运行检查
 
-- No actionable P0/P1/P2 findings.
-- No remaining P3 polish findings.
+- 桌面端标题尺寸 656.14 × 80 px，无横向溢出。
+- 移动端标题尺寸 275.48 × 33.59 px，无横向溢出。
+- 桌面端和移动端均正确显示 `v0.0.1`。
+- 动画名称为 `title-shine`，页面正常加载。
+- Tailwind 产物已重新构建。
 
-## Primary interactions and runtime checks
+## 验收清单
 
-- macOS and Windows cards resolve to real `v0.0.1` GitHub Release assets.
-- Apple and Windows icon assets both load at 150 × 150 intrinsic resolution.
-- Both cards compute to `backdrop-filter: blur(40px)`.
-- Title sweep clip path changes continuously across sampled frames.
-- Desktop and 390 × 844 mobile layouts have no horizontal overflow.
-- Browser console contains no warnings or errors.
-
-## Comparison history
-
-- Earlier finding [P1]: the white-on-white title gradient technically animated but was not visibly legible as a sweep.
-- Fix: replaced it with a narrow, diagonal dark-blue text layer with a cyan edge glow, clipped and animated across the unchanged white heading.
-- Post-fix evidence: three captured frames show the band at distinct positions while the clean final frame shows the heading returning fully white.
-- Earlier finding [P2]: both downloads shared one combined dock and lacked platform identity.
-- Fix: separated them into two independent frosted-glass cards and added local Apple and Windows 11 icons.
-- Post-fix evidence: desktop comparison and mobile capture show clear separation, equal sizing, correct icons, and intact responsive spacing.
-
-## Implementation checklist
-
-- [x] Solid-white title preserved
-- [x] Clearly visible dark text sweep added
-- [x] Download controls separated into two glass cards
-- [x] Apple and Windows platform icons added
-- [x] Desktop and mobile verified
-- [x] Release links verified
-- [x] Console checked
+- [x] 去除黑色/深色硬切块
+- [x] 白色标题始终完整
+- [x] 窄幅冷色扫光可见
+- [x] 动画节奏更慢、更平滑
+- [x] 桌面端与移动端无溢出
+- [x] 前后对照完成
 
 final result: passed

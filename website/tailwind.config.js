@@ -44,22 +44,6 @@ module.exports = {
             backgroundPosition: "-55% 50%",
           },
         },
-        "title-beam": {
-          "0%, 16%": {
-            opacity: "0",
-            transform: "translate3d(-140%, 0, 0) skewX(-8deg)",
-          },
-          "24%": {
-            opacity: ".08",
-          },
-          "38%": {
-            opacity: ".16",
-          },
-          "54%, 100%": {
-            opacity: "0",
-            transform: "translate3d(820%, 0, 0) skewX(-8deg)",
-          },
-        },
         "star-drift": {
           "0%": {
             transform: "translate3d(-1.5%, -1%, 0) scale(1.02)",
@@ -98,8 +82,7 @@ module.exports = {
       },
       animation: {
         "fade-in-down": "fade-in-down 0.5s ease-out",
-        "title-shine": "title-shine 5.2s linear infinite",
-        "title-beam": "title-beam 5.2s linear infinite",
+        "title-shine": "title-shine 5.8s ease-in-out infinite",
         "star-drift": "star-drift 18s ease-in-out infinite alternate",
         "star-drift-reverse": "star-drift-reverse 24s ease-in-out infinite alternate",
         "page-sweep": "page-sweep 8s ease-in-out infinite",

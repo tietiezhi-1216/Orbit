@@ -1043,17 +1043,17 @@ video {
 
   @keyframes title-shine{
 
-    0%, 16%{
+    0%, 20%{
       background-position: 145% 50%;
     }
 
-    54%, 100%{
+    60%, 100%{
       background-position: -55% 50%;
     }
   }
 
   .motion-safe\:animate-title-shine{
-    animation: title-shine 5.8s ease-in-out infinite;
+    animation: title-shine 8.8s ease-in-out infinite;
   }
 }
 @media (prefers-reduced-motion: reduce){

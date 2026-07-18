@@ -37,10 +37,10 @@ module.exports = {
           },
         },
         "title-shine": {
-          "0%, 16%": {
+          "0%, 20%": {
             backgroundPosition: "145% 50%",
           },
-          "54%, 100%": {
+          "60%, 100%": {
             backgroundPosition: "-55% 50%",
           },
         },
@@ -82,7 +82,7 @@ module.exports = {
       },
       animation: {
         "fade-in-down": "fade-in-down 0.5s ease-out",
-        "title-shine": "title-shine 5.8s ease-in-out infinite",
+        "title-shine": "title-shine 8.8s ease-in-out infinite",
         "star-drift": "star-drift 18s ease-in-out infinite alternate",
         "star-drift-reverse": "star-drift-reverse 24s ease-in-out infinite alternate",
         "page-sweep": "page-sweep 8s ease-in-out infinite",

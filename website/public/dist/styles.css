@@ -709,8 +709,8 @@ video {
 .bg-white\/\[\.08\]{
   background-color: rgb(255 255 255 / .08);
 }
-.bg-\[linear-gradient\(105deg\2c transparent_0\%\2c transparent_43\%\2c rgba\(35\2c 38\2c 44\2c \.18\)_45\%\2c rgba\(8\2c 9\2c 11\2c \.68\)_48\.5\%\2c rgba\(0\2c 0\2c 0\2c \.78\)_50\%\2c rgba\(26\2c 28\2c 33\2c \.36\)_52\.5\%\2c rgba\(255\2c 255\2c 255\2c \.04\)_55\%\2c transparent_57\%\2c transparent_100\%\)\]{
-  background-image: linear-gradient(105deg,transparent 0%,transparent 43%,rgba(35,38,44,.18) 45%,rgba(8,9,11,.68) 48.5%,rgba(0,0,0,.78) 50%,rgba(26,28,33,.36) 52.5%,rgba(255,255,255,.04) 55%,transparent 57%,transparent 100%);
+.bg-\[linear-gradient\(90deg\2c transparent_0\%\2c transparent_42\%\2c rgba\(0\2c 0\2c 0\2c \.10\)_44\%\2c rgba\(0\2c 0\2c 0\2c \.40\)_46\%\2c rgba\(0\2c 0\2c 0\2c \.70\)_48\%\2c rgba\(0\2c 0\2c 0\2c \.82\)_50\%\2c rgba\(0\2c 0\2c 0\2c \.70\)_52\%\2c rgba\(0\2c 0\2c 0\2c \.40\)_54\%\2c rgba\(0\2c 0\2c 0\2c \.10\)_56\%\2c transparent_58\%\2c transparent_100\%\)\]{
+  background-image: linear-gradient(90deg,transparent 0%,transparent 42%,rgba(0,0,0,.10) 44%,rgba(0,0,0,.40) 46%,rgba(0,0,0,.70) 48%,rgba(0,0,0,.82) 50%,rgba(0,0,0,.70) 52%,rgba(0,0,0,.40) 54%,rgba(0,0,0,.10) 56%,transparent 58%,transparent 100%);
 }
 .bg-gradient-to-b{
   background-image: linear-gradient(to bottom, var(--tw-gradient-stops));

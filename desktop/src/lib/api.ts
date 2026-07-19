@@ -16,9 +16,54 @@ export type ModelKind =
   | "embedding"
   | "other";
 
+export type ModelCapability =
+  | "tool-call"
+  | "reasoning"
+  | "structured-output"
+  | "web-search";
+
+export type ModelModality = "text" | "image" | "audio" | "video" | "file" | "vector";
+
+export type ReasoningEffort =
+  | "auto"
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+export interface ReasoningProfile {
+  mode: "fixed" | "effort";
+  supportedEfforts: ReasoningEffort[];
+  defaultEffort?: ReasoningEffort;
+  transport:
+    | "none"
+    | "openai-reasoning-effort"
+    | "openrouter-reasoning"
+    | "enable-thinking";
+}
+
+export interface ModelOverrides {
+  kind?: ModelKind;
+  inputModalities?: ModelModality[];
+  outputModalities?: ModelModality[];
+  capabilities?: Partial<Record<ModelCapability, boolean>>;
+  reasoning?: ReasoningProfile;
+}
+
 export interface ModelInfo {
   id: string;
   kind: ModelKind;
+  inputModalities?: ModelModality[];
+  outputModalities?: ModelModality[];
+  capabilities?: ModelCapability[];
+  reasoning?: ReasoningProfile;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  capabilitySource?: "inferred" | "registry" | "provider" | string;
+  overrides?: ModelOverrides;
 }
 
 export interface Provider {
@@ -61,6 +106,8 @@ export interface Agent {
   /** Model override; empty = follow the chat selection. */
   model: string;
   modelProviderId: string;
+  /** Empty = follow chat; otherwise English reasoning effort. */
+  reasoningEffort: "" | ReasoningEffort;
   /** Skill names visible to this agent; empty = all enabled skills. */
   skills: string[];
   /** MCP server ids; empty = all enabled servers. */
@@ -90,6 +137,7 @@ export interface AppSettings {
   providers: Provider[];
   chatProviderId: string;
   chatModel: string;
+  chatReasoningEffort: ReasoningEffort;
   /** Empty pair = use the model selected for the conversation. */
   titleProviderId: string;
   titleModel: string;
@@ -115,9 +163,27 @@ export interface AppSettings {
 
 export type ChatRole = "system" | "user" | "assistant";
 
+export interface ChatAttachment {
+  id: string;
+  /** Legacy image-only attachments omit kind and are treated as images. */
+  kind?: "image" | "file" | "folder";
+  name: string;
+  mimeType: string;
+  path?: string;
+  size?: number;
+  dataUrl?: string;
+  /** Embedded text/code or a bounded directory manifest. */
+  textContent?: string;
+  truncated?: boolean;
+}
+
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  content: string | ChatContentPart[];
 }
 
 /** One persisted transcript entry; legacy files omit `kind` (= "message"). */
@@ -125,6 +191,7 @@ export interface StoredMessage {
   kind?: "message" | "toolCall" | "permission" | "error";
   role?: ChatRole;
   content?: string;
+  attachments?: ChatAttachment[];
   error?: boolean;
   /** ms since epoch; 0 for conversations saved before messages had timestamps. */
   createdAt: number;
@@ -287,6 +354,18 @@ export function chatStream(args: ChatStreamArgs): Promise<void> {
     projectId: args.projectId ?? null,
     onEvent: channel,
   });
+}
+
+export function pickChatFiles(imagesOnly = false): Promise<ChatAttachment[]> {
+  return invoke<ChatAttachment[]>("pick_chat_files", { imagesOnly });
+}
+
+export function pickChatFolder(): Promise<ChatAttachment[]> {
+  return invoke<ChatAttachment[]>("pick_chat_folder");
+}
+
+export function inspectChatAssetPaths(paths: string[]): Promise<ChatAttachment[]> {
+  return invoke<ChatAttachment[]>("inspect_chat_asset_paths", { paths });
 }
 
 /** Answer a `permissionRequest` chat event. */

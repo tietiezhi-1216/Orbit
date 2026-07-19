@@ -7,15 +7,36 @@ import {
   useState,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Mic, RefreshCw, Settings2, Square } from "lucide-react";
+import {
+  ArrowUp,
+  FilePlus2,
+  FolderPlus,
+  ImageIcon,
+  Mic,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Square,
+  Wrench,
+} from "lucide-react";
 import { AppIconLoader } from "@/components/app-icon-loader";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ErrorNotice } from "@/features/chat/error-notice";
 import { ChannelSetupMascot } from "@/features/chat/channel-setup-mascot";
+import { attachmentKind, ChatAssetCard } from "@/features/chat/chat-asset-card";
 import { MessageItem } from "@/features/chat/message-item";
 import { ModelSelect } from "@/features/chat/model-select";
+import { ReasoningEffortSelect } from "@/features/chat/reasoning-effort-select";
 import { PermissionPrompt } from "@/features/chat/permission-prompt";
 import { ProjectSelect } from "@/features/chat/project-select";
 import { ToolCallCard } from "@/features/chat/tool-call-card";
@@ -23,10 +44,19 @@ import {
   dictationToggle,
   errorMessage,
   fetchProviderModels,
+  inspectChatAssetPaths,
+  listAgents,
   loadSettings,
+  pickChatFiles,
+  pickChatFolder,
   saveSettings,
 } from "@/lib/api";
-import type { Provider } from "@/lib/api";
+import type { ChatAttachment, Provider } from "@/lib/api";
+import {
+  effectiveModelKind,
+  modelHasCapability,
+  modelInputModalities,
+} from "@/lib/model-capabilities";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat";
 import { useUiStore } from "@/stores/ui";
@@ -40,8 +70,10 @@ const MASCOT_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 export function ChatPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
+  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: listAgents });
   const openSettings = useUiStore((s) => s.openSettings);
   const activeId = useChatStore((s) => s.activeId);
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
   const draftVersion = useChatStore((s) => s.draftVersion);
   const items = useChatStore((s) => s.items);
   const streaming = useChatStore((s) => s.streaming);
@@ -55,6 +87,10 @@ export function ChatPage() {
   const retryFromError = useChatStore((s) => s.retryFromError);
 
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [assetBusy, setAssetBusy] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [streamNow, setStreamNow] = useState(() => Date.now());
   const [mascotPhase, setMascotPhase] = useState<MascotPhase>(() =>
     items.length > 0 ? "docked" : "hero",
@@ -103,20 +139,46 @@ export function ChatPage() {
     () =>
       (settings?.providers ?? []).flatMap((provider) =>
         provider.models
-          .filter((candidate) => candidate.kind === "chat")
+          .filter((candidate) => effectiveModelKind(candidate) === "chat")
           .map((candidate) => ({
             providerId: provider.id,
             model: candidate.id,
+            modelInfo: candidate,
           })),
       ),
     [settings],
   );
-  const selectedChat = chatOptions.find(
+  const settingsSelectedChat = chatOptions.find(
     (option) =>
       option.providerId === settings?.chatProviderId && option.model === settings?.chatModel,
   );
+  const activeAgent = agentsQuery.data?.find((agent) => agent.id === activeAgentId);
+  const lockedAgentSelection = activeAgent?.model
+    ? {
+        providerId: activeAgent.modelProviderId || settings?.chatProviderId || "",
+        model: activeAgent.model,
+      }
+    : undefined;
+  const agentSelectedChat = lockedAgentSelection
+    ? chatOptions.find(
+        (option) =>
+          option.providerId === lockedAgentSelection.providerId &&
+          option.model === lockedAgentSelection.model,
+      )
+    : undefined;
+  const selectedChat = lockedAgentSelection ? agentSelectedChat : settingsSelectedChat;
   const providerId = selectedChat?.providerId ?? "";
   const model = selectedChat?.model ?? "";
+  const supportsImageInput = selectedChat
+    ? modelInputModalities(selectedChat.modelInfo).includes("image")
+    : false;
+  const hasPendingImages = attachments.some(
+    (attachment) => attachmentKind(attachment) === "image",
+  );
+  const attachmentStatus =
+    hasPendingImages && !supportsImageInput
+      ? "当前模型不支持图片输入，请更换模型或移除图片"
+      : attachmentError;
   const ready = selectedChat != null;
   const startupRefreshFailedWithoutCache =
     chatOptions.length === 0 && startupRefresh.isError;
@@ -501,16 +563,141 @@ export function ChatPage() {
   useEffect(() => {
     stickToBottomRef.current = true;
     setInput("");
+    setAttachments([]);
+    setAttachmentError("");
     inputRef.current?.focus();
   }, [activeId, draftVersion]);
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || streaming || !ready) return;
+    if ((!text && attachments.length === 0) || streaming || !ready) return;
+    if (hasPendingImages && !supportsImageInput) {
+      setAttachmentError("当前模型不支持图片输入，请更换模型或移除图片");
+      return;
+    }
     stickToBottomRef.current = true;
     setInput("");
-    void send(providerId, model, text);
+    const pendingAttachments = attachments;
+    setAttachments([]);
+    setAttachmentError("");
+    void send(providerId, model, text, pendingAttachments);
   };
+
+  const appendAssets = useCallback(
+    (incoming: ChatAttachment[]) => {
+      const rejectedImages = incoming.some(
+        (asset) => attachmentKind(asset) === "image" && !supportsImageInput,
+      );
+      const candidates = incoming.filter(
+        (asset) => attachmentKind(asset) !== "image" || supportsImageInput,
+      );
+      setAttachments((current) => {
+        const next = [...current];
+        const keys = new Set(current.map((asset) => asset.path || `${asset.name}:${asset.size}`));
+        let imageCount = current.filter((asset) => attachmentKind(asset) === "image").length;
+        for (const asset of candidates) {
+          const key = asset.path || `${asset.name}:${asset.size}`;
+          if (keys.has(key) || next.length >= 12) continue;
+          if (attachmentKind(asset) === "image") {
+            if (imageCount >= 4) continue;
+            imageCount += 1;
+          }
+          keys.add(key);
+          next.push(asset);
+        }
+        return next;
+      });
+      if (rejectedImages) {
+        setAttachmentError("当前模型不支持图片输入，其他文件仍可作为上下文添加");
+      } else if (candidates.some((asset) => asset.truncated)) {
+        setAttachmentError("部分大文件或文件夹清单已截断后加入上下文");
+      } else {
+        setAttachmentError("");
+      }
+    },
+    [supportsImageInput],
+  );
+
+  const addClipboardImages = async (files: File[]) => {
+    const selected = files.filter((file) => file.type.startsWith("image/")).slice(0, 4);
+    if (selected.length === 0) return;
+    if (!supportsImageInput) {
+      setAttachmentError("当前模型不支持图片输入");
+      return;
+    }
+    if (selected.some((file) => file.size > 20 * 1024 * 1024)) {
+      setAttachmentError("单张图片不能超过 20 MB");
+      return;
+    }
+    const read = (file: File) =>
+      new Promise<ChatAttachment>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
+        reader.onload = () =>
+          resolve({
+            id: crypto.randomUUID(),
+            kind: "image",
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            dataUrl: String(reader.result),
+          });
+        reader.readAsDataURL(file);
+      });
+    try {
+      const loaded = await Promise.all(selected.map(read));
+      appendAssets(loaded);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "读取图片失败");
+    }
+  };
+
+  const pickAssets = useCallback(
+    async (kind: "image" | "file" | "folder") => {
+      setAssetBusy(true);
+      try {
+        const assets =
+          kind === "folder" ? await pickChatFolder() : await pickChatFiles(kind === "image");
+        appendAssets(assets);
+      } catch (error) {
+        setAttachmentError(errorMessage(error));
+      } finally {
+        setAssetBusy(false);
+      }
+    },
+    [appendAssets],
+  );
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setDragActive(true);
+            return;
+          }
+          setDragActive(false);
+          if (event.payload.type === "drop") {
+            void inspectChatAssetPaths(event.payload.paths)
+              .then(appendAssets)
+              .catch((error) => setAttachmentError(errorMessage(error)));
+          }
+        }),
+      )
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {
+        // Browser mock mode has no native drag-and-drop event bridge.
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [appendAssets]);
 
   /**
    * Whether an Enter keydown is the IME committing a candidate rather than a
@@ -573,8 +760,13 @@ export function ChatPage() {
                 <div className="mt-1 flex justify-center">
                   <ModelSelect
                     prominent
-                    promptText="选择和铁铁汁一起探索世界的方式"
+                    promptText={
+                      lockedAgentSelection
+                        ? "当前智能体模型不可用"
+                        : "选择和铁铁汁一起探索世界的方式"
+                    }
                     settings={settings}
+                    lockedSelection={lockedAgentSelection}
                   />
                 </div>
               ) : (
@@ -766,11 +958,42 @@ export function ChatPage() {
           </div>
         )}
 
-        <div className="border-input bg-background focus-within:border-ring focus-within:ring-ring/30 relative z-20 flex flex-col rounded-2xl border px-2 pt-1.5 pb-1.5 shadow-sm transition-colors focus-within:ring-[3px]">
+        <div
+          className={cn(
+            "border-input bg-background focus-within:border-ring focus-within:ring-ring/30 relative z-20 flex flex-col rounded-2xl border px-2 pt-1.5 pb-1.5 shadow-sm transition-colors focus-within:ring-[3px]",
+            dragActive && "border-primary ring-primary/25 ring-[3px]",
+          )}
+        >
+          {dragActive && (
+            <div className="bg-background/90 text-foreground pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl text-sm font-medium backdrop-blur-sm">
+              松开即可添加到本轮上下文
+            </div>
+          )}
+          {attachments.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto px-2 pt-1 pb-1.5">
+              {attachments.map((attachment) => (
+                <ChatAssetCard
+                  key={attachment.id}
+                  asset={attachment}
+                  onRemove={() =>
+                    setAttachments((current) =>
+                      current.filter((candidate) => candidate.id !== attachment.id),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
           <Textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={(event) => {
+              const files = [...event.clipboardData.files];
+              if (!files.some((file) => file.type.startsWith("image/"))) return;
+              event.preventDefault();
+              void addClipboardImages(files);
+            }}
             onCompositionStart={() => {
               composingRef.current = true;
             }}
@@ -791,10 +1014,70 @@ export function ChatPage() {
           />
 
           <div className="flex items-center gap-1 pt-0.5 pl-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground size-7 shrink-0 rounded-full"
+                  disabled={!ready || assetBusy || attachments.length >= 12}
+                  aria-label="添加上下文"
+                  title="添加图片、文件或文件夹"
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" className="w-56">
+                <DropdownMenuLabel>添加到本轮上下文</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!supportsImageInput}
+                  onSelect={() => void pickAssets("image")}
+                >
+                  <ImageIcon className="size-4" />
+                  <span className="flex-1">图片</span>
+                  <span className="text-muted-foreground text-[10px]">最多 4 张</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void pickAssets("file")}>
+                  <FilePlus2 className="size-4" />
+                  <span className="flex-1">文件</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void pickAssets("folder")}>
+                  <FolderPlus className="size-4" />
+                  <span className="flex-1">文件夹</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-muted-foreground font-normal">
+                  也可以拖入文件，或直接粘贴截图
+                </DropdownMenuLabel>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <span className="text-muted-foreground flex-1 truncate text-[11px]">
-              {ready ? "Enter 发送 · Shift+Enter 换行" : setupDescription}
+              {attachmentStatus || (ready ? "Enter 发送 · Shift+Enter 换行" : setupDescription)}
             </span>
-            {settings && <ModelSelect settings={settings} />}
+            {settings && (
+              <ModelSelect
+                settings={settings}
+                lockedSelection={lockedAgentSelection}
+              />
+            )}
+            {settings && selectedChat && (
+              <ReasoningEffortSelect
+                settings={settings}
+                model={selectedChat.modelInfo}
+                effortOverride={activeAgent?.reasoningEffort || undefined}
+              />
+            )}
+            {selectedChat && !modelHasCapability(selectedChat.modelInfo, "tool-call") && (
+              <span
+                title="当前模型未声明工具调用能力，内置工具和 MCP 将不会发送"
+                className="text-muted-foreground flex h-7 shrink-0 items-center gap-1 px-1 text-[11px]"
+              >
+                <Wrench className="size-3.5" />
+                纯对话
+              </span>
+            )}
             {ready && (
               <>
                 <Button
@@ -822,7 +1105,10 @@ export function ChatPage() {
                     size="icon"
                     className="size-8 shrink-0 rounded-full"
                     onClick={handleSend}
-                    disabled={!input.trim()}
+                    disabled={
+                      (!input.trim() && attachments.length === 0) ||
+                      (hasPendingImages && !supportsImageInput)
+                    }
                     aria-label="发送"
                   >
                     <ArrowUp />

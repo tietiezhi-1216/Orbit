@@ -36,8 +36,13 @@ pub fn compose(
     prompt.push_str(&format!("\n\n# 环境\n- 当前工作区目录：{workspace}"));
 
     let enabled: Vec<&SkillMeta> = skills.iter().filter(|s| s.enabled).collect();
-    if !enabled.is_empty() {
-        prompt.push_str("\n\n# 可用技能\n以下技能可通过 skill 工具按需加载完整说明（当任务与某技能描述相关时先加载它）：\n");
+    prompt.push_str(
+        "\n\n# 技能\n技能是用户安装的扩展指令，与读写文件、搜索、命令执行等内置工具能力不同。\n",
+    );
+    if enabled.is_empty() {
+        prompt.push_str("当前没有可供本轮使用的技能。技能可能尚未安装、已被禁用或未分配给当前智能体。不要调用 skill 工具，也不要编造技能名称。询问能力时直接说明可用的内置工具。\n");
+    } else {
+        prompt.push_str("以下是本轮唯一可用的技能。仅在任务与描述相关时，使用精确名称调用 skill 工具加载完整说明：\n");
         for s in enabled {
             prompt.push_str(&format!("- {}: {}\n", s.name, s.description));
         }
@@ -72,5 +77,13 @@ mod tests {
         let p = compose("", "", "/ws", &[skill("a", true), skill("b", false)]);
         assert!(p.contains("- a: a 描述"));
         assert!(!p.contains("- b:"));
+    }
+
+    #[test]
+    fn empty_skills_are_explicitly_distinguished_from_builtin_tools() {
+        let p = compose("", "", "/ws", &[]);
+        assert!(p.contains("当前没有可供本轮使用的技能"));
+        assert!(p.contains("内置工具能力不同"));
+        assert!(p.contains("不要调用 skill 工具"));
     }
 }

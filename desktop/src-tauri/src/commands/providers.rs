@@ -3,7 +3,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use super::models::ModelInfo;
+use super::models::{
+    ModelCapability, ModelInfo, ModelModality, ReasoningEffort, ReasoningMode, ReasoningProfile,
+    ReasoningTransport,
+};
 use super::settings::{read_settings, Provider, BUILTIN_PROVIDER_API_KEY};
 use super::{api_url, snippet};
 use crate::{secrets, AppState};
@@ -24,6 +27,7 @@ pub(crate) struct Resolved {
     pub key: Option<String>,
     #[allow(dead_code)]
     pub kind: String,
+    pub models: Vec<ModelInfo>,
 }
 
 /// Curated fallback catalog per provider type, used when the provider has no
@@ -69,6 +73,7 @@ pub(crate) fn resolve(app: &AppHandle, provider_id: &str) -> Result<Resolved, St
         base_url: provider.base_url.clone(),
         key,
         kind: provider.kind.clone(),
+        models: provider.models.clone(),
     })
 }
 
@@ -199,7 +204,15 @@ pub async fn fetch_provider_models(
             .then(|| BUILTIN_PROVIDER_API_KEY.to_owned())
     });
 
-    let models = fetch_models(&state.http, &base, key.as_deref(), &kind).await?;
+    let mut models = fetch_models(&state.http, &base, key.as_deref(), &kind).await?;
+
+    if let Some(previous) = &stored {
+        for model in &mut models {
+            if let Some(old) = previous.models.iter().find(|old| old.id == model.id) {
+                model.merge_overrides_from(old);
+            }
+        }
+    }
 
     // Cache into the stored provider, if it exists.
     if stored.is_some() {
@@ -266,6 +279,30 @@ pub(crate) async fn fetch_models(
     #[derive(Deserialize)]
     struct ModelEntry {
         id: String,
+        #[serde(default)]
+        capabilities: Vec<String>,
+        #[serde(default)]
+        supported_parameters: Vec<String>,
+        #[serde(default)]
+        architecture: Option<ModelArchitecture>,
+        #[serde(default)]
+        context_length: Option<u64>,
+        #[serde(default)]
+        max_output_tokens: Option<u64>,
+        #[serde(default)]
+        top_provider: Option<TopProvider>,
+    }
+    #[derive(Deserialize)]
+    struct ModelArchitecture {
+        #[serde(default)]
+        input_modalities: Vec<String>,
+        #[serde(default)]
+        output_modalities: Vec<String>,
+    }
+    #[derive(Deserialize)]
+    struct TopProvider {
+        #[serde(default)]
+        max_completion_tokens: Option<u64>,
     }
 
     let parsed: ModelsResponse = match serde_json::from_str(&body) {
@@ -278,18 +315,113 @@ pub(crate) async fn fetch_models(
             return Err(format!("响应不是合法的模型列表：{}", snippet(&body)));
         }
     };
-    let mut ids: Vec<String> = parsed.data.into_iter().map(|m| m.id).collect();
-    ids.sort();
-    ids.dedup();
-    if ids.is_empty() {
+    let mut entries = parsed.data;
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+    entries.dedup_by(|a, b| a.id == b.id);
+    if entries.is_empty() {
         let fb = fallback_models(kind);
         if !fb.is_empty() {
             return Ok(fb);
         }
     }
-    // `/v1/models` carries no capability metadata (the relay drops it — see
-    // models.rs), so each id is classified by name.
-    Ok(ids.into_iter().map(ModelInfo::new).collect())
+    Ok(entries
+        .into_iter()
+        .map(|entry| {
+            let mut model = ModelInfo::new(entry.id);
+            let mut has_metadata = false;
+
+            if let Some(architecture) = entry.architecture {
+                let input = parse_modalities(&architecture.input_modalities);
+                let output = parse_modalities(&architecture.output_modalities);
+                if !input.is_empty() {
+                    model.input_modalities = input;
+                    has_metadata = true;
+                }
+                if !output.is_empty() {
+                    model.output_modalities = output;
+                    has_metadata = true;
+                }
+            }
+
+            let declared_capabilities: Vec<_> = entry
+                .capabilities
+                .iter()
+                .filter_map(|value| parse_capability(value))
+                .collect();
+            if !declared_capabilities.is_empty() {
+                // A provider's explicit capability list is more current than
+                // the bundled registry. supported_parameters then augments it.
+                model.capabilities = declared_capabilities;
+                has_metadata = true;
+            }
+            for capability in entry
+                .supported_parameters
+                .iter()
+                .filter_map(|value| parse_capability(value))
+            {
+                if !model.capabilities.contains(&capability) {
+                    model.capabilities.push(capability);
+                }
+                has_metadata = true;
+            }
+
+            if model.capabilities.contains(&ModelCapability::Reasoning) && model.reasoning.is_none()
+            {
+                model.reasoning = Some(ReasoningProfile {
+                    mode: ReasoningMode::Effort,
+                    supported_efforts: vec![
+                        ReasoningEffort::Low,
+                        ReasoningEffort::Medium,
+                        ReasoningEffort::High,
+                    ],
+                    default_effort: Some(ReasoningEffort::Auto),
+                    transport: ReasoningTransport::OpenaiReasoningEffort,
+                });
+            }
+
+            model.context_window = entry.context_length.or(model.context_window);
+            model.max_output_tokens = entry
+                .max_output_tokens
+                .or_else(|| entry.top_provider.and_then(|p| p.max_completion_tokens))
+                .or(model.max_output_tokens);
+            if model.context_window.is_some() || model.max_output_tokens.is_some() {
+                has_metadata = true;
+            }
+            if has_metadata {
+                model.capability_source = "provider".into();
+            }
+            model
+        })
+        .collect())
+}
+
+fn parse_modalities(values: &[String]) -> Vec<ModelModality> {
+    values
+        .iter()
+        .filter_map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "text" => Some(ModelModality::Text),
+            "image" => Some(ModelModality::Image),
+            "audio" => Some(ModelModality::Audio),
+            "video" => Some(ModelModality::Video),
+            "file" | "pdf" => Some(ModelModality::File),
+            "vector" | "embeddings" => Some(ModelModality::Vector),
+            _ => None,
+        })
+        .collect()
+}
+
+fn parse_capability(value: &str) -> Option<ModelCapability> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "tool-call" | "function-call" | "function_calling" | "tools" => {
+            Some(ModelCapability::ToolCall)
+        }
+        "reasoning" | "reasoning_effort" => Some(ModelCapability::Reasoning),
+        "structured-output" | "structured_outputs" | "response_format" => {
+            Some(ModelCapability::StructuredOutput)
+        }
+        "web-search" | "web_search" | "web_search_options" => Some(ModelCapability::WebSearch),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

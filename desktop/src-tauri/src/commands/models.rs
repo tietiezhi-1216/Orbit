@@ -8,10 +8,13 @@
 //! This is what keeps an image model out of the chat picker and a chat model out
 //! of the dictation (ASR) picker.
 
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// What a model can be used for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelKind {
     /// Text / multimodal chat completions.
@@ -29,18 +32,314 @@ pub enum ModelKind {
     Other,
 }
 
+impl Default for ModelKind {
+    fn default() -> Self {
+        Self::Chat
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelCapability {
+    ToolCall,
+    Reasoning,
+    StructuredOutput,
+    WebSearch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelModality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+    Vector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Auto,
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub fn from_setting(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" => Self::Off,
+            "minimal" => Self::Minimal,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
+            _ => Self::Auto,
+        }
+    }
+
+    pub fn as_wire_value(self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::Off => Some("none"),
+            Self::Minimal => Some("minimal"),
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::Xhigh => Some("xhigh"),
+            Self::Max => Some("max"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningMode {
+    Fixed,
+    Effort,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReasoningTransport {
+    None,
+    OpenaiReasoningEffort,
+    OpenrouterReasoning,
+    EnableThinking,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningProfile {
+    pub mode: ReasoningMode,
+    #[serde(default)]
+    pub supported_efforts: Vec<ReasoningEffort>,
+    #[serde(default)]
+    pub default_effort: Option<ReasoningEffort>,
+    pub transport: ReasoningTransport,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ModelOverrides {
+    pub kind: Option<ModelKind>,
+    pub input_modalities: Option<Vec<ModelModality>>,
+    pub output_modalities: Option<Vec<ModelModality>>,
+    pub capabilities: BTreeMap<ModelCapability, bool>,
+    pub reasoning: Option<ReasoningProfile>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub id: String,
+    #[serde(default)]
     pub kind: ModelKind,
+    #[serde(default)]
+    pub input_modalities: Vec<ModelModality>,
+    #[serde(default)]
+    pub output_modalities: Vec<ModelModality>,
+    #[serde(default)]
+    pub capabilities: Vec<ModelCapability>,
+    #[serde(default)]
+    pub reasoning: Option<ReasoningProfile>,
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
+    #[serde(default = "default_capability_source")]
+    pub capability_source: String,
+    #[serde(default)]
+    pub overrides: ModelOverrides,
 }
 
 impl ModelInfo {
     pub fn new(id: impl Into<String>) -> Self {
         let id = id.into();
         let kind = classify(&id);
-        Self { id, kind }
+        let (input_modalities, output_modalities) = default_modalities(kind);
+        let mut model = Self {
+            id,
+            kind,
+            input_modalities,
+            output_modalities,
+            capabilities: Vec::new(),
+            reasoning: None,
+            context_window: None,
+            max_output_tokens: None,
+            capability_source: default_capability_source(),
+            overrides: ModelOverrides::default(),
+        };
+        model.apply_registry();
+        model
     }
+
+    pub fn effective_kind(&self) -> ModelKind {
+        self.overrides.kind.unwrap_or(self.kind)
+    }
+
+    pub fn accepts_modality(&self, modality: ModelModality) -> bool {
+        self.overrides
+            .input_modalities
+            .as_ref()
+            .unwrap_or(&self.input_modalities)
+            .contains(&modality)
+    }
+
+    pub fn has_capability(&self, capability: ModelCapability) -> bool {
+        self.overrides
+            .capabilities
+            .get(&capability)
+            .copied()
+            .unwrap_or_else(|| self.capabilities.contains(&capability))
+    }
+
+    pub fn effective_reasoning(&self) -> Option<&ReasoningProfile> {
+        if !self.has_capability(ModelCapability::Reasoning) {
+            return None;
+        }
+        self.overrides
+            .reasoning
+            .as_ref()
+            .or(self.reasoning.as_ref())
+    }
+
+    pub fn merge_overrides_from(&mut self, previous: &Self) {
+        self.overrides = previous.overrides.clone();
+    }
+
+    fn apply_registry(&mut self) {
+        let normalized = self.id.trim().to_ascii_lowercase();
+        let registry = registry();
+        let entry = registry
+            .entries
+            .iter()
+            .find(|entry| {
+                entry
+                    .ids
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&normalized))
+            })
+            .or_else(|| {
+                registry
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        entry
+                            .prefixes
+                            .iter()
+                            .any(|prefix| normalized.starts_with(&prefix.to_ascii_lowercase()))
+                    })
+                    .max_by_key(|entry| {
+                        entry
+                            .prefixes
+                            .iter()
+                            .filter(|prefix| normalized.starts_with(&prefix.to_ascii_lowercase()))
+                            .map(String::len)
+                            .max()
+                            .unwrap_or(0)
+                    })
+            });
+        let Some(entry) = entry else { return };
+
+        if let Some(kind) = entry.kind {
+            self.kind = kind;
+        }
+        if let Some(input) = &entry.input_modalities {
+            self.input_modalities = input.clone();
+        }
+        if let Some(output) = &entry.output_modalities {
+            self.output_modalities = output.clone();
+        }
+        if let Some(capabilities) = &entry.capabilities {
+            self.capabilities = capabilities.clone();
+        }
+        if entry.reasoning.is_some() {
+            self.reasoning = entry.reasoning.clone();
+        }
+        self.context_window = entry.context_window.or(self.context_window);
+        self.max_output_tokens = entry.max_output_tokens.or(self.max_output_tokens);
+        self.capability_source = "registry".into();
+    }
+}
+
+fn default_capability_source() -> String {
+    "inferred".into()
+}
+
+fn default_modalities(kind: ModelKind) -> (Vec<ModelModality>, Vec<ModelModality>) {
+    match kind {
+        ModelKind::Chat => (vec![ModelModality::Text], vec![ModelModality::Text]),
+        ModelKind::Asr => (vec![ModelModality::Audio], vec![ModelModality::Text]),
+        ModelKind::Tts => (vec![ModelModality::Text], vec![ModelModality::Audio]),
+        ModelKind::Image => (
+            vec![ModelModality::Text, ModelModality::Image],
+            vec![ModelModality::Image],
+        ),
+        ModelKind::Video => (
+            vec![
+                ModelModality::Text,
+                ModelModality::Image,
+                ModelModality::Video,
+            ],
+            vec![ModelModality::Video],
+        ),
+        ModelKind::Embedding => (vec![ModelModality::Text], vec![ModelModality::Vector]),
+        ModelKind::Other => (vec![ModelModality::Text], vec![ModelModality::Text]),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelRegistry {
+    #[allow(dead_code)]
+    schema_version: u32,
+    #[allow(dead_code)]
+    updated_at: String,
+    entries: Vec<ModelRegistryEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelRegistryEntry {
+    #[allow(dead_code)]
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    ids: Vec<String>,
+    #[serde(default)]
+    prefixes: Vec<String>,
+    #[serde(default)]
+    kind: Option<ModelKind>,
+    #[serde(default)]
+    input_modalities: Option<Vec<ModelModality>>,
+    #[serde(default)]
+    output_modalities: Option<Vec<ModelModality>>,
+    #[serde(default)]
+    capabilities: Option<Vec<ModelCapability>>,
+    #[serde(default)]
+    reasoning: Option<ReasoningProfile>,
+    #[serde(default)]
+    context_window: Option<u64>,
+    #[serde(default)]
+    max_output_tokens: Option<u64>,
+}
+
+fn registry() -> &'static ModelRegistry {
+    static REGISTRY: OnceLock<ModelRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../../../shared/model-registry/models.json"
+        ))
+        .expect("bundled model registry must be valid")
+    })
 }
 
 /// Lowercased alphanumeric tokens of a model id.
@@ -189,5 +488,55 @@ mod tests {
         let mut de = serde_json::Deserializer::from_str(json);
         let models = deserialize_models(&mut de).unwrap();
         assert_eq!(models[0].kind, ModelKind::Image);
+    }
+
+    #[test]
+    fn bundled_registry_enriches_known_chat_models() {
+        let model = ModelInfo::new("gpt-5.5");
+        assert!(model.input_modalities.contains(&ModelModality::Image));
+        assert!(model.has_capability(ModelCapability::ToolCall));
+        assert!(model.has_capability(ModelCapability::Reasoning));
+        assert_eq!(model.capability_source, "registry");
+    }
+
+    #[test]
+    fn model_ids_with_an_effort_suffix_are_fixed() {
+        for (id, expected) in [
+            ("gemini-3.1-pro-high", ReasoningEffort::High),
+            ("gpt-oss-120b-medium", ReasoningEffort::Medium),
+        ] {
+            let model = ModelInfo::new(id);
+            let profile = model.effective_reasoning().unwrap();
+            assert_eq!(profile.mode, ReasoningMode::Fixed, "{id}");
+            assert_eq!(profile.default_effort, Some(expected), "{id}");
+            assert_eq!(profile.transport, ReasoningTransport::None, "{id}");
+        }
+    }
+
+    #[test]
+    fn deepseek_v4_uses_the_gateway_effort_vocabulary() {
+        let model = ModelInfo::new("deepseek-v4-flash");
+        let profile = model.effective_reasoning().unwrap();
+        assert_eq!(
+            profile.supported_efforts,
+            vec![
+                ReasoningEffort::Off,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ]
+        );
+        assert!(!profile.supported_efforts.contains(&ReasoningEffort::Max));
+    }
+
+    #[test]
+    fn user_capability_override_wins_over_registry() {
+        let mut model = ModelInfo::new("gpt-5.5");
+        model
+            .overrides
+            .capabilities
+            .insert(ModelCapability::ToolCall, false);
+        assert!(!model.has_capability(ModelCapability::ToolCall));
     }
 }

@@ -31,7 +31,8 @@ import {
   listSkills,
   loadSettings,
 } from "@/lib/api";
-import type { Agent, PermissionMode } from "@/lib/api";
+import type { Agent, PermissionMode, ReasoningEffort } from "@/lib/api";
+import { effectiveModelKind, modelReasoning } from "@/lib/model-capabilities";
 import { cn } from "@/lib/utils";
 
 const PERMISSION_OPTIONS: { value: PermissionMode; label: string; hint: string }[] = [
@@ -111,7 +112,11 @@ export function AgentEditor({
 
   const settings = settingsQuery.data;
   const provider = settings?.providers.find((p) => p.id === agent.modelProviderId);
-  const chatModels = (provider?.models ?? []).filter((m) => m.kind === "chat");
+  const chatModels = (provider?.models ?? []).filter(
+    (model) => effectiveModelKind(model) === "chat",
+  );
+  const overrideModel = chatModels.find((model) => model.id === agent.model);
+  const reasoning = overrideModel ? modelReasoning(overrideModel) : undefined;
   const allTools = toolsQuery.data ?? [];
 
   const patch = (p: Partial<Agent>) => onChange({ ...agent, ...p });
@@ -172,8 +177,8 @@ export function AgentEditor({
               onValueChange={(v) =>
                 patch(
                   v === "__none__"
-                    ? { modelProviderId: "", model: "" }
-                    : { modelProviderId: v, model: "" },
+                    ? { modelProviderId: "", model: "", reasoningEffort: "" }
+                    : { modelProviderId: v, model: "", reasoningEffort: "" },
                 )
               }
             >
@@ -190,7 +195,10 @@ export function AgentEditor({
               </SelectContent>
             </Select>
             {agent.modelProviderId && (
-              <Select value={agent.model || undefined} onValueChange={(v) => patch({ model: v })}>
+              <Select
+                value={agent.model || undefined}
+                onValueChange={(v) => patch({ model: v, reasoningEffort: "" })}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="选择模型" />
                 </SelectTrigger>
@@ -202,6 +210,39 @@ export function AgentEditor({
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {reasoning?.mode === "effort" && (
+              <Select
+                value={agent.reasoningEffort || "__follow__"}
+                onValueChange={(value) =>
+                  patch({
+                    reasoningEffort:
+                      value === "__follow__" ? "" : (value as ReasoningEffort),
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Reasoning Effort" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__follow__">跟随聊天设置</SelectItem>
+                  <SelectItem value="auto">Auto</SelectItem>
+                  {reasoning.supportedEfforts
+                    .filter((effort) => effort !== "auto")
+                    .map((effort) => (
+                      <SelectItem key={effort} value={effort}>
+                        {effort === "xhigh"
+                          ? "XHigh"
+                          : effort.charAt(0).toUpperCase() + effort.slice(1)}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            )}
+            {reasoning?.mode === "fixed" && (
+              <span className="text-muted-foreground px-1 text-xs">
+                Reasoning Effort: Fixed
+              </span>
             )}
           </div>
 

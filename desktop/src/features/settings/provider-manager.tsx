@@ -1,16 +1,24 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BrainCircuit,
   CheckCircle2,
   Eye,
   EyeOff,
+  FileText,
+  ImageIcon,
   Loader2,
   Pencil,
   Plus,
   PlugZap,
   RefreshCw,
+  RotateCcw,
   Save,
+  Settings2,
   Trash2,
+  Video,
+  Volume2,
+  Wrench,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -50,6 +58,20 @@ import {
   upsertProvider,
 } from "@/lib/api";
 import type { ModelInfo, ModelKind, Provider, ProviderType, ProviderView } from "@/lib/api";
+import type {
+  ModelCapability,
+  ModelModality,
+  ReasoningEffort,
+  ReasoningProfile,
+} from "@/lib/api";
+import {
+  effectiveModelKind,
+  hasModelOverrides,
+  modelHasCapability,
+  modelInputModalities,
+  modelOutputModalities,
+  modelReasoning,
+} from "@/lib/model-capabilities";
 import { SettingsSection } from "@/features/settings/settings-section";
 
 const TYPE_LABELS: Record<ProviderType, string> = {
@@ -66,6 +88,307 @@ const KIND_LABELS: Record<ModelKind, string> = {
   embedding: "向量",
   other: "其它",
 };
+
+const CAPABILITY_OPTIONS: {
+  value: ModelCapability;
+  label: string;
+  icon: typeof Wrench;
+}[] = [
+  { value: "tool-call", label: "工具 / MCP", icon: Wrench },
+  { value: "reasoning", label: "思考", icon: BrainCircuit },
+  { value: "structured-output", label: "结构化输出", icon: FileText },
+  { value: "web-search", label: "联网搜索", icon: Settings2 },
+];
+
+const MODALITY_OPTIONS: { value: ModelModality; label: string; icon: typeof ImageIcon }[] = [
+  { value: "text", label: "文本", icon: FileText },
+  { value: "image", label: "图片", icon: ImageIcon },
+  { value: "audio", label: "音频", icon: Volume2 },
+  { value: "video", label: "视频", icon: Video },
+  { value: "file", label: "文件", icon: FileText },
+];
+
+const REASONING_EFFORT_OPTIONS: { value: ReasoningEffort; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+  { value: "max", label: "Max" },
+];
+
+const SOURCE_LABELS: Record<string, string> = {
+  inferred: "名称推断",
+  registry: "Tietiezhi 模型表",
+  provider: "渠道元数据",
+};
+
+function sameValues<T extends string>(left: T[], right: T[]): boolean {
+  return [...left].sort().join("\u0000") === [...right].sort().join("\u0000");
+}
+
+function setKindOverride(model: ModelInfo, kind: ModelKind): ModelInfo {
+  const overrides = { ...model.overrides };
+  if (kind === model.kind) delete overrides.kind;
+  else overrides.kind = kind;
+  return { ...model, overrides };
+}
+
+function setCapabilityOverride(
+  model: ModelInfo,
+  capability: ModelCapability,
+  enabled: boolean,
+): ModelInfo {
+  const capabilities = { ...(model.overrides?.capabilities ?? {}) };
+  const detected = model.capabilities?.includes(capability) ?? false;
+  if (enabled === detected) delete capabilities[capability];
+  else capabilities[capability] = enabled;
+  return {
+    ...model,
+    overrides: { ...model.overrides, capabilities },
+  };
+}
+
+function setModalityOverride(
+  model: ModelInfo,
+  direction: "input" | "output",
+  modality: ModelModality,
+  enabled: boolean,
+): ModelInfo {
+  const detected =
+    direction === "input"
+      ? (model.inputModalities ?? ["text"])
+      : (model.outputModalities ?? ["text"]);
+  const effective =
+    direction === "input" ? modelInputModalities(model) : modelOutputModalities(model);
+  const next = enabled
+    ? [...new Set([...effective, modality])]
+    : effective.filter((candidate) => candidate !== modality);
+  const overrides = { ...model.overrides };
+  const key = direction === "input" ? "inputModalities" : "outputModalities";
+  if (sameValues(next, detected)) delete overrides[key];
+  else overrides[key] = next;
+  return { ...model, overrides };
+}
+
+function defaultReasoningProfile(model: ModelInfo): ReasoningProfile {
+  return (
+    modelReasoning(model) ?? {
+      mode: "effort",
+      supportedEfforts: ["low", "medium", "high"],
+      defaultEffort: "auto",
+      transport: "openai-reasoning-effort",
+    }
+  );
+}
+
+function setReasoningOverride(model: ModelInfo, reasoning: ReasoningProfile): ModelInfo {
+  return {
+    ...model,
+    overrides: { ...model.overrides, reasoning },
+  };
+}
+
+function ModelCapabilityEditor({
+  model,
+  onChange,
+}: {
+  model: ModelInfo;
+  onChange: (model: ModelInfo) => void;
+}) {
+  const reasoning = modelReasoning(model);
+  const source = SOURCE_LABELS[model.capabilitySource ?? "inferred"] ?? "自动识别";
+
+  const renderModalities = (direction: "input" | "output") => {
+    const selected =
+      direction === "input" ? modelInputModalities(model) : modelOutputModalities(model);
+    return MODALITY_OPTIONS.map((option) => {
+      const active = selected.includes(option.value);
+      const Icon = option.icon;
+      return (
+        <Button
+          key={option.value}
+          type="button"
+          variant={active ? "secondary" : "outline"}
+          size="xs"
+          aria-pressed={active}
+          onClick={() =>
+            onChange(setModalityOverride(model, direction, option.value, !active))
+          }
+        >
+          <Icon />
+          {option.label}
+        </Button>
+      );
+    });
+  };
+
+  return (
+    <div className="bg-muted/30 flex flex-col gap-3 border-t px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-muted-foreground text-xs">
+          识别来源：{source}{hasModelOverrides(model) ? " · 已手动修改" : ""}
+        </span>
+        {hasModelOverrides(model) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => onChange({ ...model, overrides: {} })}
+          >
+            <RotateCcw />
+            恢复自动识别
+          </Button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium">输入模态</span>
+        <div className="flex flex-wrap gap-1.5">{renderModalities("input")}</div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium">输出模态</span>
+        <div className="flex flex-wrap gap-1.5">{renderModalities("output")}</div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium">高级能力</span>
+        <div className="flex flex-wrap gap-1.5">
+          {CAPABILITY_OPTIONS.map((option) => {
+            const active = modelHasCapability(model, option.value);
+            const Icon = option.icon;
+            return (
+              <Button
+                key={option.value}
+                type="button"
+                variant={active ? "secondary" : "outline"}
+                size="xs"
+                aria-pressed={active}
+                onClick={() => {
+                  let next = setCapabilityOverride(model, option.value, !active);
+                  if (option.value === "reasoning" && !active && !modelReasoning(next)) {
+                    next = setReasoningOverride(next, defaultReasoningProfile(model));
+                  }
+                  onChange(next);
+                }}
+              >
+                <Icon />
+                {option.label}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+
+      {reasoning && (
+        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium">Reasoning Mode</span>
+              <Select
+                value={reasoning.mode}
+                onValueChange={(mode) =>
+                  onChange(
+                    setReasoningOverride(model, {
+                      ...defaultReasoningProfile(model),
+                      mode: mode as ReasoningProfile["mode"],
+                    }),
+                  )
+                }
+              >
+                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="effort">Adjustable</SelectItem>
+                  <SelectItem value="fixed">Fixed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium">Reasoning Protocol</span>
+              <Select
+                value={reasoning.transport}
+                onValueChange={(transport) =>
+                  onChange(
+                    setReasoningOverride(model, {
+                      ...defaultReasoningProfile(model),
+                      transport: transport as ReasoningProfile["transport"],
+                    }),
+                  )
+                }
+              >
+                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai-reasoning-effort">reasoning_effort</SelectItem>
+                  <SelectItem value="openrouter-reasoning">reasoning.effort</SelectItem>
+                  <SelectItem value="enable-thinking">enable_thinking</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {reasoning.mode === "effort" && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium">Supported Effort</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {REASONING_EFFORT_OPTIONS.map((option) => {
+                    const active = reasoning.supportedEfforts.includes(option.value);
+                    return (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        variant={active ? "secondary" : "outline"}
+                        size="xs"
+                        aria-pressed={active}
+                        onClick={() => {
+                          const current = defaultReasoningProfile(model);
+                          const supportedEfforts = active
+                            ? current.supportedEfforts.filter((effort) => effort !== option.value)
+                            : [...current.supportedEfforts, option.value];
+                          onChange(setReasoningOverride(model, { ...current, supportedEfforts }));
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium">Default Effort</span>
+                <Select
+                  value={reasoning.defaultEffort ?? "auto"}
+                  onValueChange={(defaultEffort) =>
+                    onChange(
+                      setReasoningOverride(model, {
+                        ...defaultReasoningProfile(model),
+                        defaultEffort: defaultEffort as ReasoningEffort,
+                      }),
+                    )
+                  }
+                >
+                  <SelectTrigger size="sm" className="w-32"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    {REASONING_EFFORT_OPTIONS.filter((option) =>
+                      reasoning.supportedEfforts.includes(option.value),
+                    ).map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** API key input: masked by default, with an eye toggle to reveal it. */
 function ApiKeyField({
@@ -112,7 +435,10 @@ function ApiKeyField({
 function summarizeModels(models: ModelInfo[]): string {
   if (models.length === 0) return "未获取模型";
   const counts = new Map<ModelKind, number>();
-  for (const m of models) counts.set(m.kind, (counts.get(m.kind) ?? 0) + 1);
+  for (const model of models) {
+    const kind = effectiveModelKind(model);
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([kind, n]) => `${n} ${KIND_LABELS[kind]}`)
@@ -224,6 +550,14 @@ export function ProviderManager() {
               >
                 <RefreshCw className={refreshBuiltIn.isPending ? "animate-spin" : undefined} />
                 刷新模型列表
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="管理内置渠道模型"
+                onClick={() => void editProvider(builtInProvider)}
+              >
+                <Settings2 />
               </Button>
             </div>
             {refreshBuiltIn.isError && (
@@ -338,6 +672,7 @@ function ProviderFormDialog({
   setDraft: (d: DraftState | null) => void;
   onSaved: () => void;
 }) {
+  const [expandedModelId, setExpandedModelId] = useState("");
   const fetchModels = useMutation({
     mutationFn: () =>
       fetchProviderModels({
@@ -346,7 +681,14 @@ function ProviderFormDialog({
         kind: draft!.type,
         apiKey: draft!.apiKey.trim() || undefined,
       }),
-    onSuccess: (models) => draft && setDraft({ ...draft, models }),
+    onSuccess: (models) => {
+      if (!draft) return;
+      const merged = models.map((model) => {
+        const current = draft.models.find((candidate) => candidate.id === model.id);
+        return current?.overrides ? { ...model, overrides: current.overrides } : model;
+      });
+      setDraft({ ...draft, models: merged });
+    },
   });
 
   const save = useMutation({
@@ -376,12 +718,13 @@ function ProviderFormDialog({
       onOpenChange={(open) => {
         if (!open) {
           setDraft(null);
+          setExpandedModelId("");
           fetchModels.reset();
           save.reset();
         }
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[min(48rem,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{draft?.isNew ? "添加供应商" : "编辑供应商"}</DialogTitle>
         </DialogHeader>
@@ -446,39 +789,72 @@ function ProviderFormDialog({
                 <div className="flex items-center justify-between">
                   <Label>模型（{summarizeModels(draft.models)}）</Label>
                 </div>
-                {/* Type is inferred from the model name — the only signal
-                    `/v1/models` gives — so it can be wrong; let the user fix it. */}
-                <div className="max-h-56 overflow-y-auto rounded-md border">
+                <div className="max-h-80 overflow-y-auto rounded-md border">
                   {draft.models.map((m, i) => (
                     <div
                       key={m.id}
-                      className="flex items-center gap-2 border-b px-2.5 py-1.5 last:border-b-0"
+                      className="border-b last:border-b-0"
                     >
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{m.id}</span>
-                      <Select
-                        value={m.kind}
-                        onValueChange={(v) => {
-                          const models = [...draft.models];
-                          models[i] = { ...m, kind: v as ModelKind };
-                          patch({ models });
-                        }}
-                      >
-                        <SelectTrigger size="sm" className="w-28 shrink-0">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(Object.keys(KIND_LABELS) as ModelKind[]).map((k) => (
-                            <SelectItem key={k} value={k}>
-                              {KIND_LABELS[k]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-center gap-2 px-2.5 py-1.5">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs">{m.id}</span>
+                        <div className="text-muted-foreground flex shrink-0 items-center gap-1">
+                          {modelInputModalities(m).includes("image") && (
+                            <ImageIcon aria-label="支持图片输入" className="size-3.5" />
+                          )}
+                          {modelHasCapability(m, "reasoning") && (
+                            <BrainCircuit aria-label="支持思考" className="size-3.5" />
+                          )}
+                          {modelHasCapability(m, "tool-call") && (
+                            <Wrench aria-label="支持工具和 MCP" className="size-3.5" />
+                          )}
+                        </div>
+                        <Select
+                          value={effectiveModelKind(m)}
+                          onValueChange={(v) => {
+                            const models = [...draft.models];
+                            models[i] = setKindOverride(m, v as ModelKind);
+                            patch({ models });
+                          }}
+                        >
+                          <SelectTrigger size="sm" className="w-28 shrink-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(KIND_LABELS) as ModelKind[]).map((k) => (
+                              <SelectItem key={k} value={k}>
+                                {KIND_LABELS[k]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`编辑 ${m.id} 的能力`}
+                          aria-expanded={expandedModelId === m.id}
+                          onClick={() =>
+                            setExpandedModelId((current) => current === m.id ? "" : m.id)
+                          }
+                        >
+                          <Settings2 />
+                        </Button>
+                      </div>
+                      {expandedModelId === m.id && (
+                        <ModelCapabilityEditor
+                          model={m}
+                          onChange={(model) => {
+                            const models = [...draft.models];
+                            models[i] = model;
+                            patch({ models });
+                          }}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  类型按模型名自动判断（接口不提供该信息），判断错了可以在这里改。
+                  能力来自渠道元数据和 Tietiezhi 模型表；判断不准确时可以手动覆盖。
                 </p>
               </div>
             )}

@@ -4228,6 +4228,7 @@ dependencies = [
  "globset",
  "http",
  "keyring",
+ "mime_guess",
  "regex",
  "reqwest 0.12.28",
  "reqwest 0.13.4",

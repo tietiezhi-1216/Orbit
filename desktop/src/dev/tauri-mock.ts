@@ -7,7 +7,22 @@
 //! Never reaches a release build: the entry points import it behind
 //! `import.meta.env.DEV`, so the dynamic import is dead code in production.
 
-import type { ModelInfo, Provider } from "@/lib/api";
+import type { ChatAttachment, ModelInfo, Provider } from "@/lib/api";
+
+const capableChatModel = (id: string): ModelInfo => ({
+  id,
+  kind: "chat",
+  inputModalities: ["text", "image"],
+  outputModalities: ["text"],
+  capabilities: ["tool-call", "reasoning", "structured-output"],
+  reasoning: {
+    mode: "effort",
+    supportedEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+    defaultEffort: "medium",
+    transport: "openai-reasoning-effort",
+  },
+  capabilitySource: "registry",
+});
 
 const TERLN_MODELS: ModelInfo[] = [
   { id: "agnes-1.5-flash", kind: "chat" },
@@ -17,16 +32,29 @@ const TERLN_MODELS: ModelInfo[] = [
   { id: "claude-opus-4-6-thinking", kind: "chat" },
   { id: "claude-sonnet-4-6", kind: "chat" },
   { id: "codex-auto-review", kind: "chat" },
-  { id: "deepseek-v4-flash", kind: "chat" },
+  {
+    id: "deepseek-v4-flash",
+    kind: "chat",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    capabilities: ["tool-call", "reasoning"],
+    reasoning: {
+      mode: "effort",
+      supportedEfforts: ["off", "low", "medium", "high", "xhigh"],
+      defaultEffort: "medium",
+      transport: "openai-reasoning-effort",
+    },
+    capabilitySource: "registry",
+  },
   { id: "gemini-2.5-flash", kind: "chat" },
   { id: "gemini-2.5-flash-image", kind: "image" },
   { id: "gemini-2.5-pro", kind: "chat" },
   { id: "gemini-3-flash", kind: "chat" },
   { id: "gemini-3.1-pro-high", kind: "chat" },
-  { id: "gpt-5.4", kind: "chat" },
-  { id: "gpt-5.4-mini", kind: "chat" },
-  { id: "gpt-5.5", kind: "chat" },
-  { id: "gpt-5.6-luna", kind: "chat" },
+  capableChatModel("gpt-5.4"),
+  capableChatModel("gpt-5.4-mini"),
+  capableChatModel("gpt-5.5"),
+  capableChatModel("gpt-5.6-luna"),
   { id: "gpt-image-2", kind: "image" },
   { id: "gpt-oss-120b-medium", kind: "chat" },
   { id: "sensenova-u1-fast", kind: "image" },
@@ -66,7 +94,7 @@ export function installTauriMock(): void {
 
   const state = {
     settings: {
-      settingsVersion: 2,
+      settingsVersion: 4,
       providers: [
         {
           id: "builtin-official",
@@ -79,6 +107,7 @@ export function installTauriMock(): void {
       ] as Provider[],
       chatProviderId: setupState === "ready" ? "builtin-official" : "",
       chatModel: setupState === "ready" ? "gpt-5.6-luna" : "",
+      chatReasoningEffort: "auto",
       titleProviderId: "",
       titleModel: "",
       asrProviderId: "",
@@ -113,6 +142,7 @@ export function installTauriMock(): void {
         systemPrompt: "你是一个专注写代码的助手。",
         model: "",
         modelProviderId: "",
+        reasoningEffort: "",
         skills: [],
         mcpServers: [],
         tools: [],
@@ -320,6 +350,42 @@ export function installTauriMock(): void {
     mcp_restart_server: () => {},
     mcp_stop_server: () => {},
     pick_workspace_dir: () => "/Users/demo/Projects/example",
+    pick_chat_files: (a) => {
+      const image = Boolean(a.imagesOnly);
+      const asset: ChatAttachment = image
+        ? {
+            id: crypto.randomUUID(),
+            kind: "image",
+            name: "preview.svg",
+            mimeType: "image/svg+xml",
+            path: "/Users/demo/Desktop/preview.svg",
+            size: 238,
+            dataUrl:
+              "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='200'%3E%3Crect width='100%25' height='100%25' fill='%2322c55e'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' fill='white' font-size='28'%3ETietiezhi%3C/text%3E%3C/svg%3E",
+          }
+        : {
+            id: crypto.randomUUID(),
+            kind: "file",
+            name: "requirements.md",
+            mimeType: "text/markdown",
+            path: "/Users/demo/Desktop/requirements.md",
+            size: 84,
+            textContent: "# Requirements\n\n- Unified attachment button\n- Asset cards",
+          };
+      return [asset];
+    },
+    pick_chat_folder: () => [
+      {
+        id: crypto.randomUUID(),
+        kind: "folder",
+        name: "design-assets",
+        mimeType: "application/x-directory",
+        path: "/Users/demo/Desktop/design-assets",
+        size: 0,
+        textContent: "README.md\nimages/\nimages/hero.png\nnotes.txt",
+      } satisfies ChatAttachment,
+    ],
+    inspect_chat_asset_paths: () => [],
     list_projects: () =>
       structuredClone(state.projects).sort(
         (a, b) => (b.lastOpenedAt as number) - (a.lastOpenedAt as number),
@@ -391,8 +457,14 @@ export function installTauriMock(): void {
     },
 
     chat_stream: (a) => {
-      const messages = a.messages as { content: string }[];
-      const last = messages[messages.length - 1]?.content ?? "";
+      const messages = a.messages as {
+        content: string | { type: string; text?: string }[];
+      }[];
+      const content = messages[messages.length - 1]?.content ?? "";
+      const last =
+        typeof content === "string"
+          ? content
+          : (content.find((part) => part.type === "text")?.text ?? "[图片]");
       if (last.includes("标题生成测试")) {
         return stream(
           a.requestId as number,

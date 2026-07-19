@@ -239,11 +239,11 @@ pub async fn polish_stream(
     let messages = vec![
         ChatMessage {
             role: "system".into(),
-            content: system,
+            content: system.into(),
         },
         ChatMessage {
             role: "user".into(),
-            content: transcript,
+            content: transcript.into(),
         },
     ];
     stream_to_channel(

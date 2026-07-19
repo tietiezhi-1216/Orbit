@@ -5,15 +5,18 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
-use super::models::{classify, ModelKind};
+use super::models::{classify, ModelInfo, ModelKind, ModelModality, ReasoningEffort};
 use super::{api_url, providers, snippet};
 use crate::agent::failure::ChatFailure;
 use crate::AppState;
 
 pub use crate::agent::events::ChatEvent;
 
-fn ensure_chat_model(model: &str) -> Result<(), String> {
-    match classify(model) {
+fn ensure_chat_model(model: &str, model_info: Option<&ModelInfo>) -> Result<(), String> {
+    match model_info
+        .map(ModelInfo::effective_kind)
+        .unwrap_or_else(|| classify(model))
+    {
         ModelKind::Chat => Ok(()),
         _ => Err(format!("模型「{model}」不支持聊天接口，请选择一个聊天模型")),
     }
@@ -22,7 +25,17 @@ fn ensure_chat_model(model: &str) -> Result<(), String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: serde_json::Value,
+}
+
+fn messages_contain_images(messages: &[ChatMessage]) -> bool {
+    messages.iter().any(|message| {
+        message.content.as_array().is_some_and(|parts| {
+            parts.iter().any(|part| {
+                part.get("type").and_then(serde_json::Value::as_str) == Some("image_url")
+            })
+        })
+    })
 }
 
 /// Incremental SSE line splitter: feed raw bytes, get complete lines back.
@@ -98,8 +111,27 @@ pub async fn chat_stream(
         .unwrap()
         .insert(request_id, cancel.clone());
 
+    // An agent may pin both its provider and model. Legacy agent profiles only
+    // stored the model, in which case the chat's current provider remains in use.
+    let (provider_id, model) = match super::agents::model_override(&app, agent_id.as_deref()) {
+        Some((agent_provider_id, agent_model)) if !agent_provider_id.trim().is_empty() => {
+            (agent_provider_id, agent_model)
+        }
+        Some((_, agent_model)) => (provider_id, agent_model),
+        None => (provider_id, model),
+    };
+
     let result: Result<bool, ChatFailure> = match providers::resolve(&app, &provider_id) {
         Ok(resolved) => {
+            let reasoning_effort =
+                super::agents::reasoning_effort_override(&app, agent_id.as_deref())
+                    .or_else(|| {
+                        super::settings::read_settings(&app)
+                            .ok()
+                            .map(|settings| settings.chat_reasoning_effort)
+                    })
+                    .map(|effort| ReasoningEffort::from_setting(&effort))
+                    .unwrap_or(ReasoningEffort::Auto);
             match super::agents::resolve_env(
                 &app,
                 agent_id.as_deref(),
@@ -107,10 +139,21 @@ pub async fn chat_stream(
                 conversation_id.as_deref(),
             ) {
                 Ok(env) => {
-                    // Per-agent model override beats the frontend selection.
-                    let model =
-                        super::agents::model_override(&app, agent_id.as_deref()).unwrap_or(model);
-                    match ensure_chat_model(&model) {
+                    let model_info = resolved
+                        .models
+                        .iter()
+                        .find(|candidate| candidate.id == model);
+                    match ensure_chat_model(&model, model_info) {
+                        Ok(())
+                            if messages_contain_images(&messages)
+                                && !model_info.is_some_and(|info| {
+                                    info.accepts_modality(ModelModality::Image)
+                                }) =>
+                        {
+                            Err(ChatFailure::message(
+                                "当前模型未声明图片输入能力，请更换模型或在模型设置中开启",
+                            ))
+                        }
                         Ok(()) => {
                             let _ = on_event.send(ChatEvent::Started {
                                 model: model.clone(),
@@ -124,6 +167,8 @@ pub async fn chat_stream(
                                 &resolved.base_url,
                                 resolved.key.as_deref(),
                                 &model,
+                                model_info,
+                                reasoning_effort,
                                 messages,
                                 env,
                                 &cancel,
@@ -177,7 +222,13 @@ pub(crate) async fn stream_to_channel(
         .insert(request_id, cancel.clone());
 
     let result = match providers::resolve(&app, &provider_id) {
-        Ok(resolved) => match ensure_chat_model(&model) {
+        Ok(resolved) => match ensure_chat_model(
+            &model,
+            resolved
+                .models
+                .iter()
+                .find(|candidate| candidate.id == model),
+        ) {
             Ok(()) => {
                 let _ = on_event.send(ChatEvent::Started {
                     model: model.clone(),
@@ -363,9 +414,25 @@ mod tests {
 
     #[test]
     fn image_model_is_rejected_before_chat_request() {
-        let error = ensure_chat_model("sensenova-u1-fast").unwrap_err();
+        let error = ensure_chat_model("sensenova-u1-fast", None).unwrap_err();
         assert!(error.contains("不支持聊天接口"));
-        assert!(ensure_chat_model("deepseek-v4-flash").is_ok());
+        assert!(ensure_chat_model("deepseek-v4-flash", None).is_ok());
+    }
+
+    #[test]
+    fn detects_openai_image_content_parts() {
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: json!([
+                { "type": "text", "text": "看一下" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,AA==" } }
+            ]),
+        }];
+        assert!(messages_contain_images(&messages));
+        assert!(!messages_contain_images(&[ChatMessage {
+            role: "user".into(),
+            content: "只是文字".into(),
+        }]));
     }
 
     /// End-to-end: HTTP request → SSE body → parsed deltas, against a real

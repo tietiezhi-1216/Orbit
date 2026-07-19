@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { SettingsSection } from "@/features/settings/settings-section";
 import { loadSettings, saveSettings } from "@/lib/api";
+import { effectiveModelKind } from "@/lib/model-capabilities";
 
 const FOLLOW_CONVERSATION = "__follow_conversation__";
 const encode = (providerId: string, model: string) => `${providerId}::${model}`;
@@ -22,7 +23,7 @@ export function TitleModelSection() {
 
   const options = settings.providers.flatMap((provider) =>
     provider.models
-      .filter((model) => model.kind === "chat")
+      .filter((model) => effectiveModelKind(model) === "chat")
       .map((model) => ({
         providerId: provider.id,
         providerName: provider.name,

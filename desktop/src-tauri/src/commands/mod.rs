@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod assets;
 pub mod capsule;
 pub mod chat;
 pub mod conversations;

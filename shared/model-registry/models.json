@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-20",
+  "entries": [
+    {
+      "source": "https://developers.openai.com/api/docs/models",
+      "prefixes": ["gpt-5."],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["minimal", "low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "source": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+      "ids": ["gpt-oss-120b-medium"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "fixed",
+        "supportedEfforts": [],
+        "defaultEffort": "medium",
+        "transport": "none"
+      }
+    },
+    {
+      "source": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+      "prefixes": ["gpt-oss-"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high"],
+        "defaultEffort": "medium",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/effort",
+      "prefixes": ["claude-opus-4-", "claude-sonnet-4-"],
+      "inputModalities": ["text", "image"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high", "max"],
+        "defaultEffort": "high",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
+      "prefixes": ["gemini-3.5-flash"],
+      "inputModalities": ["text", "image", "audio", "video", "file"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["minimal", "low", "medium", "high"],
+        "defaultEffort": "medium",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
+      "ids": ["gemini-3.1-pro-high"],
+      "inputModalities": ["text", "image", "audio", "video", "file"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "fixed",
+        "supportedEfforts": [],
+        "defaultEffort": "high",
+        "transport": "none"
+      }
+    },
+    {
+      "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
+      "prefixes": ["gemini-3.1-pro"],
+      "inputModalities": ["text", "image", "audio", "video", "file"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high"],
+        "defaultEffort": "high",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "ids": ["gemini-3-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+      "inputModalities": ["text", "image", "audio", "video", "file"],
+      "outputModalities": ["text"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["low", "medium", "high"],
+        "defaultEffort": "high",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "prefixes": ["deepseek-v4-"],
+      "capabilities": ["tool-call", "reasoning"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["off", "low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
+        "transport": "openai-reasoning-effort"
+      }
+    },
+    {
+      "ids": ["agnes-1.5-flash", "agnes-2.0-flash"],
+      "capabilities": ["tool-call"]
+    },
+    {
+      "prefixes": ["codex-"],
+      "capabilities": ["tool-call", "reasoning", "structured-output"],
+      "reasoning": {
+        "mode": "fixed",
+        "supportedEfforts": [],
+        "transport": "none"
+      }
+    },
+    {
+      "ids": ["mimo-v2.5-pro"],
+      "capabilities": ["tool-call", "reasoning"],
+      "reasoning": {
+        "mode": "effort",
+        "supportedEfforts": ["off", "low", "medium", "high"],
+        "defaultEffort": "auto",
+        "transport": "enable-thinking"
+      }
+    }
+  ]
+}

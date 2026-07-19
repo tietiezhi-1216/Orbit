@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { loadSettings, saveSettings } from "@/lib/api";
 import type { AppSettings, ModelKind } from "@/lib/api";
+import { effectiveModelKind } from "@/lib/model-capabilities";
 import { SettingsSection } from "@/features/settings/settings-section";
 
 const OUTPUT_LANGUAGES: { value: string; label: string }[] = [
@@ -133,7 +134,7 @@ function ProviderModelPicker({
   const current = providerId && model ? encode(providerId, model) : "";
   const options = providers.flatMap((p) =>
     p.models
-      .filter((m) => m.kind === kind)
+      .filter((model) => effectiveModelKind(model) === kind)
       .map((m) => ({ providerId: p.id, providerName: p.name, model: m.id })),
   );
 

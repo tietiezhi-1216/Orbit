@@ -15,6 +15,7 @@ const emptyAgent = (): Agent => ({
   systemPrompt: "",
   model: "",
   modelProviderId: "",
+  reasoningEffort: "",
   skills: [],
   mcpServers: [],
   tools: [],

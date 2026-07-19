@@ -18,6 +18,8 @@ pub struct Agent {
     pub system_prompt: String,
     pub model: String,
     pub model_provider_id: String,
+    /// Empty follows the chat selection; otherwise an English effort value.
+    pub reasoning_effort: String,
     pub skills: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub tools: Vec<String>,
@@ -32,6 +34,7 @@ impl Default for Agent {
             system_prompt: String::new(),
             model: String::new(),
             model_provider_id: String::new(),
+            reasoning_effort: String::new(),
             skills: Vec::new(),
             mcp_servers: Vec::new(),
             tools: Vec::new(),
@@ -82,9 +85,16 @@ pub(crate) fn find_agent(app: &AppHandle, id: &str) -> Option<Agent> {
 }
 
 /// The agent's model override, if it sets one.
-pub(crate) fn model_override(app: &AppHandle, agent_id: Option<&str>) -> Option<String> {
+/// The provider id stays empty for legacy profiles, so callers can retain the
+/// provider selected by the chat while still honoring the model override.
+pub(crate) fn model_override(app: &AppHandle, agent_id: Option<&str>) -> Option<(String, String)> {
     let agent = find_agent(app, agent_id?)?;
-    (!agent.model.trim().is_empty()).then(|| agent.model)
+    (!agent.model.trim().is_empty()).then(|| (agent.model_provider_id, agent.model))
+}
+
+pub(crate) fn reasoning_effort_override(app: &AppHandle, agent_id: Option<&str>) -> Option<String> {
+    let agent = find_agent(app, agent_id?)?;
+    (!agent.reasoning_effort.trim().is_empty()).then(|| agent.reasoning_effort)
 }
 
 /// Resolve the full execution environment for a chat turn.
@@ -96,6 +106,10 @@ pub(crate) fn resolve_env(
 ) -> Result<AgentEnv, String> {
     let settings = super::settings::read_settings(app)?;
     let agent = agent_id.and_then(|id| find_agent(app, id));
+    let allowed_tools = agent
+        .as_ref()
+        .map(|agent| agent.tools.clone())
+        .unwrap_or_default();
 
     let workspace = super::workspace::resolve_task_workspace(app, project_id, conversation_id)?;
 
@@ -111,6 +125,18 @@ pub(crate) fn resolve_env(
             }
         }
     }
+    let skill_tool_allowed =
+        allowed_tools.is_empty() || allowed_tools.iter().any(|tool| tool == "skill");
+    if !skill_tool_allowed {
+        for skill in &mut skill_list {
+            skill.enabled = false;
+        }
+    }
+    let available_skills: Vec<_> = skill_list
+        .iter()
+        .filter(|skill| skill.enabled)
+        .map(|skill| skill.name.clone())
+        .collect();
 
     // MCP servers: enabled ones, optionally narrowed by the agent.
     let mcp_configs: Vec<_> = settings
@@ -145,7 +171,8 @@ pub(crate) fn resolve_env(
 
     Ok(AgentEnv {
         system_prompt,
-        allowed_tools: agent.map(|a| a.tools).unwrap_or_default(),
+        allowed_tools,
+        available_skills,
         permission_mode,
         mcp_configs,
         workspace,

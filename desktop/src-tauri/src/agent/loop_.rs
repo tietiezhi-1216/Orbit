@@ -11,6 +11,10 @@ use tokio_util::sync::CancellationToken;
 use super::events::ChatEvent;
 use super::failure::{retry_delay_ms, ChatFailure, MAX_RETRIES};
 use crate::commands::api_url;
+use crate::commands::models::{
+    ModelCapability, ModelInfo, ReasoningEffort, ReasoningMode, ReasoningProfile,
+    ReasoningTransport,
+};
 use crate::mcp::{self, McpManager, McpServerConfig};
 use crate::permission::{needs_approval, Decision, PermissionBroker, PermissionMode};
 use crate::tools::{self, ToolCtx};
@@ -21,6 +25,7 @@ pub const MAX_ITERATIONS: usize = 50;
 pub struct AgentEnv {
     pub system_prompt: String,
     pub allowed_tools: Vec<String>,
+    pub available_skills: Vec<String>,
     pub permission_mode: PermissionMode,
     pub mcp_configs: Vec<McpServerConfig>,
     pub workspace: PathBuf,
@@ -164,6 +169,8 @@ async fn stream_once(
     model: &str,
     transcript: &[Value],
     tools: &[Value],
+    reasoning: Option<&ReasoningProfile>,
+    reasoning_effort: ReasoningEffort,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<StreamOutcome, ChatFailure> {
@@ -176,6 +183,7 @@ async fn stream_once(
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools.to_vec());
     }
+    apply_reasoning(&mut body, reasoning, reasoning_effort);
 
     let mut req = http.post(api_url(base_url, "chat/completions")).json(&body);
     if let Some(key) = api_key {
@@ -264,6 +272,37 @@ async fn stream_once(
     })
 }
 
+fn apply_reasoning(
+    body: &mut Value,
+    profile: Option<&ReasoningProfile>,
+    selected: ReasoningEffort,
+) {
+    let Some(profile) = profile else { return };
+    if profile.mode == ReasoningMode::Fixed || selected == ReasoningEffort::Auto {
+        return;
+    }
+    if !profile.supported_efforts.is_empty() && !profile.supported_efforts.contains(&selected) {
+        return;
+    }
+
+    match profile.transport {
+        ReasoningTransport::None => {}
+        ReasoningTransport::OpenaiReasoningEffort => {
+            if let Some(value) = selected.as_wire_value() {
+                body["reasoning_effort"] = Value::String(value.into());
+            }
+        }
+        ReasoningTransport::OpenrouterReasoning => {
+            if let Some(value) = selected.as_wire_value() {
+                body["reasoning"] = json!({"effort": value});
+            }
+        }
+        ReasoningTransport::EnableThinking => {
+            body["enable_thinking"] = Value::Bool(selected != ReasoningEffort::Off);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn stream_with_retries(
     http: &reqwest::Client,
@@ -272,13 +311,24 @@ async fn stream_with_retries(
     model: &str,
     transcript: &[Value],
     tools: &[Value],
+    reasoning: Option<&ReasoningProfile>,
+    reasoning_effort: ReasoningEffort,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<StreamOutcome, ChatFailure> {
     let mut retries = 0;
     loop {
         match stream_once(
-            http, base_url, api_key, model, transcript, tools, cancel, on_event,
+            http,
+            base_url,
+            api_key,
+            model,
+            transcript,
+            tools,
+            reasoning,
+            reasoning_effort,
+            cancel,
+            on_event,
         )
         .await
         {
@@ -344,34 +394,54 @@ pub async fn run_agent_loop(
     base_url: &str,
     api_key: Option<&str>,
     model: &str,
+    model_info: Option<&ModelInfo>,
+    reasoning_effort: ReasoningEffort,
     messages: Vec<crate::commands::chat::ChatMessage>,
     env: AgentEnv,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<bool, ChatFailure> {
-    // Collect the model-facing tools: builtins + namespaced MCP tools.
-    let mut tool_specs = tools::specs(&env.allowed_tools);
-    for cfg in &env.mcp_configs {
-        match mcp_manager.list_tools(cfg).await {
-            Ok(list) => {
-                for t in list {
-                    tool_specs.push(json!({
-                        "type": "function",
-                        "function": {
-                            "name": mcp::namespaced(&cfg.id, &t.name),
-                            "description": t.description,
-                            "parameters": t.input_schema,
-                        }
-                    }));
+    // MCP is a client-side bridge implemented through native function calling.
+    // Unknown and explicitly unsupported models run as plain chat instead of
+    // receiving a request body they may reject with HTTP 400.
+    let supports_tools =
+        model_info.is_some_and(|model| model.has_capability(ModelCapability::ToolCall));
+    let mut tool_specs = if supports_tools {
+        tools::specs(&env.allowed_tools, &env.available_skills)
+    } else {
+        Vec::new()
+    };
+    if supports_tools {
+        for cfg in &env.mcp_configs {
+            match mcp_manager.list_tools(cfg).await {
+                Ok(list) => {
+                    for t in list {
+                        tool_specs.push(json!({
+                            "type": "function",
+                            "function": {
+                                "name": mcp::namespaced(&cfg.id, &t.name),
+                                "description": t.description,
+                                "parameters": t.input_schema,
+                            }
+                        }));
+                    }
                 }
+                // A dead MCP server shouldn't kill the chat; surface in status.
+                Err(e) => eprintln!("[mcp] {}: {e}", cfg.name),
             }
-            // A dead MCP server shouldn't kill the chat; surface in status.
-            Err(e) => eprintln!("[mcp] {}: {e}", cfg.name),
         }
     }
 
+    let system_prompt = if supports_tools {
+        env.system_prompt.clone()
+    } else {
+        format!(
+            "{}\n\n# 工具限制\n当前模型未声明原生工具调用能力。本轮没有可调用的内置工具或 MCP 工具；不要声称已经读取、执行或修改了本地内容。",
+            env.system_prompt
+        )
+    };
     let mut transcript: Vec<Value> = Vec::with_capacity(messages.len() + 1);
-    transcript.push(json!({"role": "system", "content": env.system_prompt}));
+    transcript.push(json!({"role": "system", "content": system_prompt}));
     for m in &messages {
         transcript.push(json!({"role": m.role, "content": m.content}));
     }
@@ -380,6 +450,7 @@ pub async fn run_agent_loop(
         app: app.clone(),
         http: http.clone(),
         workspace: env.workspace.clone(),
+        available_skills: env.available_skills.clone(),
         cancel: cancel.clone(),
     };
 
@@ -391,6 +462,8 @@ pub async fn run_agent_loop(
             model,
             &transcript,
             &tool_specs,
+            model_info.and_then(ModelInfo::effective_reasoning),
+            reasoning_effort,
             cancel,
             on_event,
         )
@@ -553,5 +626,50 @@ mod tests {
         let mut acc = ToolCallAccumulator::default();
         acc.push(delta(Some(0), None, None, Some("junk")));
         assert!(acc.finish().is_empty());
+    }
+
+    fn adjustable_reasoning(transport: ReasoningTransport) -> ReasoningProfile {
+        ReasoningProfile {
+            mode: ReasoningMode::Effort,
+            supported_efforts: vec![ReasoningEffort::Low, ReasoningEffort::High],
+            default_effort: Some(ReasoningEffort::High),
+            transport,
+        }
+    }
+
+    #[test]
+    fn reasoning_effort_is_added_only_when_supported() {
+        let mut body = json!({"model": "test"});
+        apply_reasoning(
+            &mut body,
+            Some(&adjustable_reasoning(
+                ReasoningTransport::OpenaiReasoningEffort,
+            )),
+            ReasoningEffort::High,
+        );
+        assert_eq!(body["reasoning_effort"], "high");
+
+        let mut unsupported = json!({"model": "test"});
+        apply_reasoning(
+            &mut unsupported,
+            Some(&adjustable_reasoning(
+                ReasoningTransport::OpenaiReasoningEffort,
+            )),
+            ReasoningEffort::Medium,
+        );
+        assert!(unsupported.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn auto_reasoning_leaves_provider_default_untouched() {
+        let mut body = json!({"model": "test"});
+        apply_reasoning(
+            &mut body,
+            Some(&adjustable_reasoning(
+                ReasoningTransport::OpenrouterReasoning,
+            )),
+            ReasoningEffort::Auto,
+        );
+        assert!(body.get("reasoning").is_none());
     }
 }

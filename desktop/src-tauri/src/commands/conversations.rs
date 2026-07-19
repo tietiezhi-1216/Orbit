@@ -6,6 +6,26 @@ use tauri::{AppHandle, Manager};
 
 pub const DEFAULT_CONVERSATION_TITLE: &str = "新会话";
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredAttachment {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    pub name: String,
+    pub mime_type: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub data_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text_content: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
 /// One persisted transcript item. Legacy assistant failures used `error`;
 /// current files store them as a dedicated `kind: "error"` item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +38,8 @@ pub struct StoredMessage {
     pub role: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<StoredAttachment>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub error: bool,
     /// When the message was created (ms since epoch). 0 for conversations
@@ -69,6 +91,10 @@ fn default_kind() -> String {
 }
 
 fn is_zero_u8(value: &u8) -> bool {
+    *value == 0
+}
+
+fn is_zero_u64(value: &u64) -> bool {
     *value == 0
 }
 
@@ -489,6 +515,17 @@ mod tests {
         assert!(!msg.error);
         let out = serde_json::to_string(&msg).unwrap();
         assert!(!out.contains("error"));
+    }
+
+    #[test]
+    fn legacy_image_attachments_gain_asset_defaults() {
+        let json = r#"{"role":"user","content":"看图","attachments":[{"id":"a1","name":"old.png","mimeType":"image/png","dataUrl":"data:image/png;base64,AA=="}]}"#;
+        let message: StoredMessage = serde_json::from_str(json).unwrap();
+        let asset = &message.attachments[0];
+        assert!(asset.kind.is_empty());
+        assert!(asset.path.is_empty());
+        assert_eq!(asset.data_url, "data:image/png;base64,AA==");
+        assert!(!asset.truncated);
     }
 
     #[test]

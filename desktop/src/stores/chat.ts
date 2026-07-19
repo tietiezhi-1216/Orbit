@@ -15,6 +15,8 @@ import {
   setConversationPinned as setConversationPinnedApi,
 } from "@/lib/api";
 import type {
+  ChatAttachment,
+  ChatMessage,
   ChatRole,
   ConversationMeta,
   PermissionDecision,
@@ -33,6 +35,7 @@ export type ChatItem =
       kind: "message";
       role: ChatRole;
       content: string;
+      attachments?: ChatAttachment[];
       error?: boolean;
       model?: string;
       providerId?: string;
@@ -103,7 +106,12 @@ interface ChatState {
   restoreArchived: (id: string) => Promise<void>;
   deleteArchived: (id: string) => Promise<void>;
   setConversationPinned: (id: string, pinned: boolean) => Promise<void>;
-  send: (providerId: string, model: string, text: string) => Promise<void>;
+  send: (
+    providerId: string,
+    model: string,
+    text: string,
+    attachments?: ChatAttachment[],
+  ) => Promise<void>;
   setAgent: (agentId: string) => void;
   setProject: (projectId: string) => void;
   respondPermission: (requestId: string, decision: PermissionDecision) => void;
@@ -174,6 +182,7 @@ const toItems = (messages: StoredMessage[]): ChatItem[] =>
       kind: "message",
       role: m.role ?? "assistant",
       content: m.content ?? "",
+      attachments: m.attachments,
       model: m.model,
       providerId: m.providerId,
       promptTokens: m.promptTokens,
@@ -226,6 +235,7 @@ const toStored = (items: ChatItem[]): StoredMessage[] =>
       kind: "message",
       role: it.role,
       content: it.content,
+      attachments: it.attachments,
       createdAt: it.createdAt,
       ...(it.error ? { error: true } : {}),
       model: it.model,
@@ -240,11 +250,47 @@ const toStored = (items: ChatItem[]): StoredMessage[] =>
     };
   });
 
-/** Model-facing history: only clean text turns with actual content. */
+const toModelContent = (
+  text: string,
+  attachments?: ChatAttachment[],
+): ChatMessage["content"] => {
+  if (!attachments?.length) return text;
+  const context = attachments
+    .filter((attachment) => (attachment.kind ?? "image") !== "image")
+    .map((attachment) => {
+      const label = attachment.kind === "folder" ? "attached_directory" : "attached_file";
+      const attributes = [
+        `name=${JSON.stringify(attachment.name)}`,
+        attachment.path ? `path=${JSON.stringify(attachment.path)}` : "",
+        attachment.mimeType ? `mime=${JSON.stringify(attachment.mimeType)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const body = attachment.textContent
+        ? `${attachment.textContent}${attachment.truncated ? "\n[内容已截断]" : ""}`
+        : "[二进制资产：内容未内嵌；需要时可通过本地路径读取。]";
+      return `<${label} ${attributes}>\n${body}\n</${label}>`;
+    })
+    .join("\n\n");
+  const combinedText = [text, context].filter(Boolean).join("\n\n");
+  const images = attachments.filter(
+    (attachment) => (attachment.kind ?? "image") === "image" && attachment.dataUrl,
+  );
+  if (images.length === 0) return combinedText;
+  return [
+    ...(combinedText ? [{ type: "text" as const, text: combinedText }] : []),
+    ...images.map((attachment) => ({
+      type: "image_url" as const,
+      image_url: { url: attachment.dataUrl! },
+    })),
+  ];
+};
+
+/** Model-facing history: clean user/assistant turns, including image parts. */
 const toHistory = (items: ChatItem[]) =>
   items.flatMap((it) =>
-    it.kind === "message" && !it.error && it.content
-      ? [{ role: it.role, content: it.content }]
+    it.kind === "message" && !it.error && (it.content || it.attachments?.length)
+      ? [{ role: it.role, content: toModelContent(it.content, it.attachments) }]
       : [],
   );
 
@@ -505,7 +551,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }));
     },
 
-    async send(providerId, model, text) {
+    async send(providerId, model, text, attachments = []) {
       if (get().streaming) return;
       const requestId = nextId++;
 
@@ -530,6 +576,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         kind: "message",
         role: "user",
         content: text,
+        attachments,
         createdAt: now,
       };
       set({
@@ -640,7 +687,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
           requestId,
           providerId,
           model,
-          messages: [...history, { role: "user", content: text }],
+          messages: [
+            ...history,
+            { role: "user", content: toModelContent(text, attachments) },
+          ],
           conversationId: convId,
           agentId: get().activeAgentId || undefined,
           projectId: get().projectId || undefined,
@@ -806,7 +856,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
               convId,
               providerId,
               effectiveModel,
-              text,
+              text || attachments.map((attachment) => attachment.name).join("、") || "附件",
               titleAssistantText,
               saved,
             );
@@ -833,13 +883,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const { items } = get();
       const index = items.findIndex((it) => it.id === itemId);
       if (index < 0) return;
+      const edited = items[index];
       interruptStream();
 
       // Fork before the edited turn, then send it as the new branch's opener.
       // The branch keeps the default title until AI title generation finishes.
       const kept = items.slice(0, index);
       set({ activeId: crypto.randomUUID(), items: kept });
-      await get().send(providerId, model, text);
+      await get().send(
+        providerId,
+        model,
+        text,
+        edited.kind === "message" ? edited.attachments : undefined,
+      );
     },
 
     async retryFromError(itemId, providerId, model) {
@@ -860,7 +916,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (userIndex < 0) return;
       interruptStream();
       set({ items: items.slice(0, userIndex), streamRetry: null });
-      await get().send(providerId, model, userItem.content);
+      await get().send(providerId, model, userItem.content, userItem.attachments);
     },
 
     stop() {

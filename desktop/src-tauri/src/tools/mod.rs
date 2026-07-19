@@ -15,6 +15,7 @@ pub struct ToolCtx {
     pub app: AppHandle,
     pub http: reqwest::Client,
     pub workspace: PathBuf,
+    pub available_skills: Vec<String>,
     pub cancel: CancellationToken,
 }
 
@@ -70,8 +71,8 @@ fn spec(name: &str, description: &str, parameters: Value) -> Value {
 }
 
 /// OpenAI function-calling specs for the builtin tools, filtered to `allowed`
-/// (empty = all).
-pub fn specs(allowed: &[String]) -> Vec<Value> {
+/// (empty = all). The skill loader only exists when this turn has skills.
+pub fn specs(allowed: &[String], available_skills: &[String]) -> Vec<Value> {
     let want = |n: &str| allowed.is_empty() || allowed.iter().any(|a| a == n);
     let mut out = Vec::new();
     if want("read_file") {
@@ -154,12 +155,12 @@ pub fn specs(allowed: &[String]) -> Vec<Value> {
             },"required":["url"]}),
         ));
     }
-    if want("skill") {
+    if want("skill") && !available_skills.is_empty() {
         out.push(spec(
             "skill",
-            "加载一个技能（skill）的完整说明文档。当系统提示词中的技能清单与当前任务相关时调用。",
+            "加载当前可用技能的完整说明。仅当用户请求与系统提示词中的某个技能描述匹配时调用，名称必须从可用列表中精确选择，不得编造。",
             json!({"type":"object","properties":{
-                "name":{"type":"string","description":"技能名称"}
+                "name":{"type":"string","description":"当前可用技能的精确名称","enum":available_skills}
             },"required":["name"]}),
         ));
     }
@@ -263,5 +264,35 @@ mod tests {
         let big = "x\n".repeat(MAX_OUTPUT_LINES + 10);
         let out = truncate_output(&big);
         assert!(out.contains("已截断"));
+    }
+
+    #[test]
+    fn skill_tool_is_omitted_when_no_skill_is_available() {
+        let specs = specs(&[], &[]);
+        assert!(!specs.iter().any(|spec| spec["function"]["name"] == "skill"));
+    }
+
+    #[test]
+    fn skill_tool_only_accepts_available_skill_names() {
+        let available = vec!["git-release".to_string(), "pdf-tools".to_string()];
+        let specs = specs(&[], &available);
+        let skill = specs
+            .iter()
+            .find(|spec| spec["function"]["name"] == "skill")
+            .unwrap();
+
+        assert_eq!(
+            skill["function"]["parameters"]["properties"]["name"]["enum"],
+            json!(["git-release", "pdf-tools"])
+        );
+    }
+
+    #[test]
+    fn agent_tool_selection_can_disable_the_skill_loader() {
+        let allowed = vec!["read_file".to_string()];
+        let available = vec!["git-release".to_string()];
+        let specs = specs(&allowed, &available);
+
+        assert!(!specs.iter().any(|spec| spec["function"]["name"] == "skill"));
     }
 }

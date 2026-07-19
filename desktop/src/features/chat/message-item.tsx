@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, GitBranch, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ChatAssetCard } from "@/features/chat/chat-asset-card";
 import { Markdown } from "@/features/chat/markdown";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -155,7 +156,7 @@ export const MessageItem = memo(function MessageItem({
         setDraft(item.content);
       }} onSubmit={() => {
         const text = draft.trim();
-        if (!text) return;
+        if (!text && !item.attachments?.length) return;
         setEditing(false);
         onEdit(item.id, text);
       }} />;
@@ -167,8 +168,18 @@ export const MessageItem = memo(function MessageItem({
         onPointerEnter={() => onHoverChange(hoverKey)}
         onPointerLeave={() => onHoverChange(null)}
       >
-        <div className="bg-muted max-w-[70%] rounded-xl px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap select-text">
-          {item.content}
+        <div className="bg-muted flex max-w-[70%] flex-col gap-2 rounded-xl px-3 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap select-text">
+          {item.attachments && item.attachments.length > 0 && (
+            <div className="flex max-w-full flex-wrap gap-1.5">
+              {item.attachments.map((attachment) => (
+                <ChatAssetCard
+                  key={attachment.id}
+                  asset={attachment}
+                />
+              ))}
+            </div>
+          )}
+          {item.content && <span className="px-1">{item.content}</span>}
         </div>
         <ActionRow createdAt={item.createdAt} align="end" visible={hovered}>
           <ActionButton

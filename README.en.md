@@ -10,19 +10,15 @@ An open agent network for macOS, Windows, Linux, iOS, Android, servers, and edge
 
 [简体中文](./README.md) · [English](./README.en.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md)
 
-[![Latest Release](https://img.shields.io/github/v/release/tietiezhi-1216/tietiezhi?style=flat-square&label=release&color=0ea5e9)](https://github.com/tietiezhi-1216/tietiezhi/releases/latest)
-[![Desktop CI](https://img.shields.io/github/actions/workflow/status/tietiezhi-1216/tietiezhi/desktop.yml?branch=main&style=flat-square&label=desktop%20CI)](https://github.com/tietiezhi-1216/tietiezhi/actions/workflows/desktop.yml)
-[![License](https://img.shields.io/github/license/tietiezhi-1216/tietiezhi?style=flat-square&color=f97316)](./LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-13.3%2B-111827?style=flat-square&logo=apple)](https://github.com/tietiezhi-1216/tietiezhi/releases/latest)
-[![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&logo=windows11)](https://github.com/tietiezhi-1216/tietiezhi/releases/latest)
-
-[Website & Download](https://tietiezhi-1216.github.io/tietiezhi/) · [Latest Release](https://github.com/tietiezhi-1216/tietiezhi/releases/latest) · [Roadmap](./docs/ROADMAP.en.md) · [Privacy](./docs/PRIVACY.md) · [Issues](https://github.com/tietiezhi-1216/tietiezhi/issues)
+[⬇️ Download for macOS / Windows](https://tietiezhi-1216.github.io/tietiezhi/) · [📦 Releases](https://github.com/tietiezhi-1216/tietiezhi/releases/latest) · [🗺️ Roadmap](./docs/ROADMAP.en.md) · [🔒 Privacy](./docs/PRIVACY.md) · [💬 Issues](https://github.com/tietiezhi-1216/tietiezhi/issues) · [⚖️ Apache-2.0](./LICENSE)
 
 </div>
 
 <div align="center">
 
-<img src="./artifacts/home-animation-final.png" alt="Tietiezhi desktop home screen" width="860">
+<img src="./artifacts/home-model-title-explore-open.png" alt="Tietiezhi desktop with the multi-provider model picker open" width="860">
+
+<sub>Search and select models from different providers in one place</sub>
 
 </div>
 

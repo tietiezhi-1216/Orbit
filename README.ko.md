@@ -10,17 +10,15 @@ macOS, Windows, Linux, iOS, Android, 서버와 엣지 노드를 잇는 개방형
 
 [简体中文](./README.md) · [English](./README.en.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md)
 
-[![Latest Release](https://img.shields.io/github/v/release/tietiezhi-1216/tietiezhi?style=flat-square&label=release&color=0ea5e9)](https://github.com/tietiezhi-1216/tietiezhi/releases/latest)
-[![Desktop CI](https://img.shields.io/github/actions/workflow/status/tietiezhi-1216/tietiezhi/desktop.yml?branch=main&style=flat-square&label=desktop%20CI)](https://github.com/tietiezhi-1216/tietiezhi/actions/workflows/desktop.yml)
-[![License](https://img.shields.io/github/license/tietiezhi-1216/tietiezhi?style=flat-square&color=f97316)](./LICENSE)
-
-[웹사이트 및 다운로드](https://tietiezhi-1216.github.io/tietiezhi/) · [최신 릴리스](https://github.com/tietiezhi-1216/tietiezhi/releases/latest) · [로드맵](./docs/ROADMAP.en.md) · [개인정보 보호](./docs/PRIVACY.md) · [Issues](https://github.com/tietiezhi-1216/tietiezhi/issues)
+[⬇️ macOS / Windows 다운로드](https://tietiezhi-1216.github.io/tietiezhi/) · [📦 릴리스](https://github.com/tietiezhi-1216/tietiezhi/releases/latest) · [🗺️ 로드맵](./docs/ROADMAP.en.md) · [🔒 개인정보 보호](./docs/PRIVACY.md) · [💬 Issues](https://github.com/tietiezhi-1216/tietiezhi/issues) · [⚖️ Apache-2.0](./LICENSE)
 
 </div>
 
 <div align="center">
 
-<img src="./artifacts/home-animation-final.png" alt="Tietiezhi 데스크톱 홈 화면" width="860">
+<img src="./artifacts/home-model-title-explore-open.png" alt="여러 공급자의 모델 선택기를 연 Tietiezhi 데스크톱" width="860">
+
+<sub>여러 공급자의 모델을 한곳에서 검색하고 선택</sub>
 
 </div>
 

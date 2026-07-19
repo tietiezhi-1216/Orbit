@@ -383,7 +383,12 @@ export function installTauriMock(): void {
       state.settings.providers = state.settings.providers.filter((p) => p.id !== a.id);
       delete state.keys[a.id as string];
     },
-    fetch_provider_models: (a) => (a.kind === "mimo" ? MIMO_MODELS : TERLN_MODELS),
+    fetch_provider_models: (a) => {
+      const models = a.kind === "mimo" ? MIMO_MODELS : TERLN_MODELS;
+      const provider = state.settings.providers.find((candidate) => candidate.id === a.id);
+      if (provider) provider.models = structuredClone(models);
+      return models;
+    },
 
     chat_stream: (a) => {
       const messages = a.messages as { content: string }[];

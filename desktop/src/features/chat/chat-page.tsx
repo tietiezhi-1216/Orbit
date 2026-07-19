@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Mic, RefreshCw, Settings2, Square } from "lucide-react";
 import { AppIconLoader } from "@/components/app-icon-loader";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,14 @@ import { ModelSelect } from "@/features/chat/model-select";
 import { PermissionPrompt } from "@/features/chat/permission-prompt";
 import { ProjectSelect } from "@/features/chat/project-select";
 import { ToolCallCard } from "@/features/chat/tool-call-card";
-import { dictationToggle, errorMessage, loadSettings, saveSettings } from "@/lib/api";
+import {
+  dictationToggle,
+  errorMessage,
+  fetchProviderModels,
+  loadSettings,
+  saveSettings,
+} from "@/lib/api";
+import type { Provider } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat";
 import { useUiStore } from "@/stores/ui";
@@ -76,8 +83,22 @@ export function ChatPage() {
   const compositionEndAt = useRef(0);
   const peekTimersRef = useRef<number[]>([]);
   const autoSelectionRef = useRef("");
+  const startupRefreshRef = useRef(false);
 
   const settings = settingsQuery.data;
+  const builtInProvider = settings?.providers.find((provider) => provider.builtIn);
+  const startupRefresh = useMutation({
+    mutationFn: (provider: Provider) =>
+      fetchProviderModels({
+        id: provider.id,
+        baseUrl: provider.baseUrl,
+        kind: provider.type,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["providers"] });
+    },
+  });
   const chatOptions = useMemo(
     () =>
       (settings?.providers ?? []).flatMap((provider) =>
@@ -97,13 +118,20 @@ export function ChatPage() {
   const providerId = selectedChat?.providerId ?? "";
   const model = selectedChat?.model ?? "";
   const ready = selectedChat != null;
+  const startupRefreshFailedWithoutCache =
+    chatOptions.length === 0 && startupRefresh.isError;
+  const setupError = settingsQuery.error ?? startupRefresh.error;
   const readiness =
-    settingsQuery.isError
+    settingsQuery.isError || startupRefreshFailedWithoutCache
       ? "error"
       : settings == null
         ? "loading"
         : settings.providers.length === 0
           ? "no-provider"
+          : chatOptions.length === 0 &&
+              builtInProvider &&
+              (startupRefresh.isIdle || startupRefresh.isPending)
+            ? "loading"
           : chatOptions.length === 0
             ? "no-chat-model"
             : ready
@@ -121,7 +149,7 @@ export function ChatPage() {
             : "模型已到位，就等你选择";
   const setupDescription =
     readiness === "error"
-      ? errorMessage(settingsQuery.error)
+      ? errorMessage(setupError)
       : readiness === "loading"
         ? "铁铁汁正在确认连接状态"
         : readiness === "no-provider"
@@ -146,6 +174,12 @@ export function ChatPage() {
     lastItem?.kind === "permission" && lastItem.decision == null;
   const indicatorActive = streaming && !waitingForPermission;
   const hasConversation = items.length > 0;
+
+  useEffect(() => {
+    if (!builtInProvider || startupRefreshRef.current) return;
+    startupRefreshRef.current = true;
+    startupRefresh.mutate(builtInProvider);
+  }, [builtInProvider, startupRefresh]);
 
   useEffect(() => {
     if (!settings || selectedChat || chatOptions.length !== 1) return;
@@ -554,7 +588,13 @@ export function ChatPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => void settingsQuery.refetch()}
+                        onClick={() => {
+                          if (builtInProvider) {
+                            startupRefresh.mutate(builtInProvider);
+                          } else {
+                            void settingsQuery.refetch();
+                          }
+                        }}
                       >
                         <RefreshCw /> 重新检查
                       </Button>

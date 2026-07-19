@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   PlugZap,
+  RefreshCw,
   Save,
   Trash2,
 } from "lucide-react";
@@ -177,6 +178,17 @@ export function ProviderManager() {
   const providers = providersQuery.data ?? [];
   const builtInProvider = providers.find((provider) => provider.builtIn);
   const customProviders = providers.filter((provider) => !provider.builtIn);
+  const refreshBuiltIn = useMutation({
+    mutationFn: async () => {
+      if (!builtInProvider) throw new Error("未找到 Tietiezhi Gateway");
+      return fetchProviderModels({
+        id: builtInProvider.id,
+        baseUrl: builtInProvider.baseUrl,
+        kind: builtInProvider.type,
+      });
+    },
+    onSuccess: invalidate,
+  });
 
   const editProvider = async (provider: ProviderView) => {
     const key = await providerKey(provider.id).catch(() => null);
@@ -187,22 +199,39 @@ export function ProviderManager() {
     <SettingsSection>
       <div className="flex flex-col gap-5">
         {builtInProvider && (
-          <div className="flex items-center gap-4 rounded-xl border px-4 py-3.5">
-            <img
-              src="/gateway/tietiezhi-gateway.png"
-              alt="Tietiezhi Gateway"
-              draggable={false}
-              className="size-12 shrink-0 select-none rounded-full object-contain"
-            />
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span className="truncate text-sm font-semibold">Tietiezhi Gateway</span>
-              <span className="text-muted-foreground text-xs">
-                {summarizeModels(builtInProvider.models)}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-4 rounded-xl border px-4 py-3.5">
+              <img
+                src="/gateway/tietiezhi-gateway.png"
+                alt="Tietiezhi Gateway"
+                draggable={false}
+                className="size-12 shrink-0 select-none rounded-full object-contain"
+              />
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <span className="truncate text-sm font-semibold">Tietiezhi Gateway</span>
+                <span className="text-muted-foreground text-xs">
+                  {summarizeModels(builtInProvider.models)}
+                </span>
+              </div>
+              <span className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                免费
               </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={refreshBuiltIn.isPending}
+                onClick={() => refreshBuiltIn.mutate()}
+              >
+                <RefreshCw className={refreshBuiltIn.isPending ? "animate-spin" : undefined} />
+                刷新模型列表
+              </Button>
             </div>
-            <span className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-              免费
-            </span>
+            {refreshBuiltIn.isError && (
+              <Alert variant="destructive">
+                <AlertTitle>刷新模型列表失败</AlertTitle>
+                <AlertDescription>{errorMessage(refreshBuiltIn.error)}</AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
 

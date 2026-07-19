@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
 use super::models::{deserialize_models, known_kind_override, ModelInfo, ModelKind};
-use crate::{secrets, AppState};
+use crate::secrets;
 
 const CURRENT_SETTINGS_VERSION: u32 = 2;
 pub(crate) const BUILTIN_PROVIDER_ID: &str = "builtin-official";
@@ -270,43 +270,8 @@ fn new_id(_app: &AppHandle) -> String {
 }
 
 #[tauri::command]
-pub async fn load_settings(
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<AppSettings, String> {
-    let mut settings = read_settings(&app)?;
-    let needs_builtin_models = settings
-        .providers
-        .iter()
-        .any(|provider| provider.built_in && provider.models.is_empty());
-    if !needs_builtin_models {
-        return Ok(settings);
-    }
-
-    let models = super::providers::fetch_models(
-        &state.http,
-        BUILTIN_PROVIDER_URL,
-        Some(BUILTIN_PROVIDER_API_KEY),
-        "openai",
-    )
-    .await
-    .map_err(|error| format!("自动获取 Tietiezhi Gateway 模型失败：{error}"))?;
-    if models.is_empty() {
-        return Err("Tietiezhi Gateway 暂未返回可用模型，请稍后重试".into());
-    }
-
-    // Re-read before persisting so a slow model request cannot overwrite a
-    // provider the user added while the request was in flight.
-    settings = read_settings(&app)?;
-    if let Some(provider) = settings
-        .providers
-        .iter_mut()
-        .find(|provider| provider.built_in)
-    {
-        provider.models = models;
-    }
-    write_settings(&app, &settings)?;
-    Ok(settings)
+pub fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
+    read_settings(&app)
 }
 
 #[tauri::command]

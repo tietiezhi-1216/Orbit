@@ -9,6 +9,7 @@
     "dev": "vite",
     "dev:mock": "vite --port 1421",
     "build": "tsc --noEmit && vite build",
+    "build:store": "tsc --noEmit && vite build --mode store",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"

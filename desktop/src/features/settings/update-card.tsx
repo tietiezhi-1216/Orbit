@@ -4,7 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { CheckCircle2, Download, Loader2, RefreshCw, RotateCw } from "lucide-react";
+import { CheckCircle2, Download, Loader2, RefreshCw, RotateCw, Store } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,24 @@ type UpdateStage =
 
 /** In-app updater: check → download & install → relaunch. */
 export function UpdateCard() {
+  if (import.meta.env.MODE === "store") {
+    return <MicrosoftStoreUpdateCard />;
+  }
+
+  return <DirectDownloadUpdateCard />;
+}
+
+function MicrosoftStoreUpdateCard() {
+  return (
+    <SettingsSection description="Microsoft Store 会自动提供经过验证的应用更新。">
+      <Badge variant="secondary">
+        <Store /> Microsoft Store 管理
+      </Badge>
+    </SettingsSection>
+  );
+}
+
+function DirectDownloadUpdateCard() {
   const [stage, setStage] = useState<UpdateStage>({ kind: "idle" });
   const versionQuery = useQuery({
     queryKey: ["appVersion"],

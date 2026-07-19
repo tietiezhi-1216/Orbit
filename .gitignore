@@ -19,3 +19,6 @@ desktop/src-tauri/gen/schemas/
 # ---- Env & secrets ----
 .env
 .env.*
+# Microsoft Store MSIX build output
+desktop/store-layout/
+desktop/store-output/

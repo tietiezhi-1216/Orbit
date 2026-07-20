@@ -6,6 +6,13 @@ interface ChannelSetupMascotProps {
   className?: string;
   mascotClassName?: string;
   mascotRef?: Ref<HTMLSpanElement>;
+  /**
+   * Freeze the idle breathing to its resting pose. Used during the mascot
+   * fly-over so the flying ghost lands on a stationary target and the static
+   * octopus doesn't jitter when it takes back over — breathing then restarts
+   * cleanly from rest.
+   */
+  motionPaused?: boolean;
 }
 
 type ParticleKind = "dot" | "ring" | "star";
@@ -91,17 +98,27 @@ export function ChannelSetupMascot({
   className,
   mascotClassName,
   mascotRef,
+  motionPaused = false,
 }: ChannelSetupMascotProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Seed once so pausing/resuming the loop keeps the same particle field.
+  const particlesRef = useRef<ParticleSpec[]>(null);
+  if (!particlesRef.current) {
+    particlesRef.current = makeParticles(crypto.getRandomValues(new Uint32Array(1))[0]);
+  }
 
   useEffect(() => {
+    // The per-particle shadowBlur draw is costly on WebKit. Skip it entirely
+    // while the mascot is hidden (in a conversation or mid fly-over) so it stops
+    // stealing frames from the ghost's flight.
+    if (motionPaused) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
 
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    const particles = makeParticles(seed);
+    const particles = particlesRef.current;
+    if (!particles) return;
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let animationFrame = 0;
     let width = 0;
@@ -214,7 +231,7 @@ export function ChannelSetupMascot({
       motionQuery.removeEventListener("change", handleMotionChange);
       window.cancelAnimationFrame(animationFrame);
     };
-  }, []);
+  }, [motionPaused]);
 
   return (
     <span
@@ -228,7 +245,14 @@ export function ChannelSetupMascot({
         ref={canvasRef}
         className="pointer-events-none absolute inset-0 size-full"
       />
-      <span className="animate-channel-breathe pointer-events-none absolute inset-0 grid place-items-center motion-reduce:animate-none">
+      <span
+        className={cn(
+          "pointer-events-none absolute inset-0 grid place-items-center motion-reduce:animate-none",
+          // Toggle rather than layer animate-none over the breathe class so the
+          // breathe restarts from 0% (its resting pose) when motion resumes.
+          motionPaused ? "animate-none" : "animate-channel-breathe",
+        )}
+      >
         <span
           ref={mascotRef}
           data-mascot-motion="float"

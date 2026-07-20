@@ -35,6 +35,8 @@ export type ChatItem =
       kind: "message";
       role: ChatRole;
       content: string;
+      /** Reasoning / chain-of-thought, shown collapsed above the answer. */
+      reasoning?: string;
       attachments?: ChatAttachment[];
       error?: boolean;
       model?: string;
@@ -42,6 +44,7 @@ export type ChatItem =
       promptTokens?: number;
       completionTokens?: number;
       totalTokens?: number;
+      cachedTokens?: number;
       usageEstimated?: boolean;
       firstTokenMs?: number;
       durationMs?: number;
@@ -182,12 +185,14 @@ const toItems = (messages: StoredMessage[]): ChatItem[] =>
       kind: "message",
       role: m.role ?? "assistant",
       content: m.content ?? "",
+      reasoning: m.reasoning,
       attachments: m.attachments,
       model: m.model,
       providerId: m.providerId,
       promptTokens: m.promptTokens,
       completionTokens: m.completionTokens,
       totalTokens: m.totalTokens,
+      cachedTokens: m.cachedTokens,
       usageEstimated: m.usageEstimated,
       firstTokenMs: m.firstTokenMs,
       durationMs: m.durationMs,
@@ -235,6 +240,7 @@ const toStored = (items: ChatItem[]): StoredMessage[] =>
       kind: "message",
       role: it.role,
       content: it.content,
+      ...(it.reasoning ? { reasoning: it.reasoning } : {}),
       attachments: it.attachments,
       createdAt: it.createdAt,
       ...(it.error ? { error: true } : {}),
@@ -243,6 +249,7 @@ const toStored = (items: ChatItem[]): StoredMessage[] =>
       promptTokens: it.promptTokens,
       completionTokens: it.completionTokens,
       totalTokens: it.totalTokens,
+      cachedTokens: it.cachedTokens,
       usageEstimated: it.usageEstimated,
       firstTokenMs: it.firstTokenMs,
       durationMs: it.durationMs,
@@ -595,6 +602,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // the next delta opens a fresh message (text/tool interleaving).
       let textItemId: number | null = null;
       let reply = "";
+      let reasoningText = "";
       let failed = false;
       let cancelled = false;
       let sawText = false;
@@ -605,6 +613,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       let promptTokens = 0;
       let completionTokens = 0;
       let totalTokens = 0;
+      let cachedTokens = 0;
       let hasReportedUsage = false;
 
       const patchItem = (id: number, patch: (item: ChatItem) => ChatItem) => {
@@ -623,6 +632,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const ensureTextItem = (): number => {
         if (textItemId == null) {
           reply = "";
+          reasoningText = "";
           const item: ChatItem = {
             id: nextId++,
             kind: "message",
@@ -647,8 +657,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         flushTimer = null;
         if (textItemId != null) {
           const content = reply;
+          const reasoning = reasoningText;
           patchItem(textItemId, (it) =>
-            it.kind === "message" ? { ...it, content } : it,
+            it.kind === "message" ? { ...it, content, reasoning } : it,
           );
         }
       };
@@ -706,6 +717,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
                 }
                 break;
               }
+              case "reasoning": {
+                if (get().streamRetry != null) set({ streamRetry: null });
+                firstTokenAt ??= Date.now();
+                ensureTextItem();
+                reasoningText += event.content;
+                scheduleFlush();
+                break;
+              }
               case "delta": {
                 if (get().streamRetry != null) set({ streamRetry: null });
                 sawText = true;
@@ -723,6 +742,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                 promptTokens += event.promptTokens;
                 completionTokens += event.completionTokens;
                 totalTokens += event.totalTokens;
+                cachedTokens += event.cachedTokens ?? 0;
                 break;
               }
               case "toolCallStart": {
@@ -831,6 +851,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                         promptTokens,
                         completionTokens,
                         totalTokens,
+                        cachedTokens,
                         usageEstimated: false,
                       }
                     : {}),

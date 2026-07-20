@@ -113,12 +113,75 @@ const components: Components = {
   td: ({ children }) => <td className="border-border border px-2.5 py-1.5">{children}</td>,
 };
 
-export function Markdown({ content, className }: { content: string; className?: string }) {
+/**
+ * rehype plugin: wrap each word (outside code) in `<span class="token-in">` so
+ * newly streamed words fade up from transparent. Append-only streaming keeps the
+ * leading spans stable, so React reuses them and only new words animate. Enabled
+ * only while a reply is streaming.
+ */
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+  properties?: Record<string, unknown>;
+}
+
+// Tokenize for the streaming fade: each CJK character is its own token (Chinese
+// has no spaces, so per-word would never fade mid-paragraph), other scripts stay
+// per whitespace-delimited word, and whitespace runs are preserved verbatim.
+const CJK = "\\u3000-\\u303f\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uff00-\\uffef";
+const FADE_TOKEN_RE = new RegExp(`\\s+|[${CJK}]|[^\\s${CJK}]+`, "g");
+
+export const fadeTokens = (value: string): string[] => value.match(FADE_TOKEN_RE) ?? [];
+export const isFadeSpace = (token: string): boolean => /^\s+$/.test(token);
+
+function rehypeFadeWords() {
+  const walk = (node: HastNode, inCode: boolean) => {
+    if (!Array.isArray(node.children)) return;
+    const insideCode = inCode || node.tagName === "pre" || node.tagName === "code";
+    const next: HastNode[] = [];
+    for (const child of node.children) {
+      if (child.type === "text" && !insideCode && child.value) {
+        for (const part of fadeTokens(child.value)) {
+          next.push(
+            isFadeSpace(part)
+              ? { type: "text", value: part }
+              : {
+                  type: "element",
+                  tagName: "span",
+                  properties: { className: ["token-in"] },
+                  children: [{ type: "text", value: part }],
+                },
+          );
+        }
+      } else {
+        if (child.type === "element") walk(child, insideCode);
+        next.push(child);
+      }
+    }
+    node.children = next;
+  };
+  return (tree: HastNode) => walk(tree, false);
+}
+
+export function Markdown({
+  content,
+  className,
+  streaming = false,
+}: {
+  content: string;
+  className?: string;
+  streaming?: boolean;
+}) {
   return (
     <div className={cn("text-sm break-words select-text", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        rehypePlugins={[
+          [rehypeHighlight, { detect: true, ignoreMissing: true }],
+          ...(streaming ? [rehypeFadeWords] : []),
+        ]}
         components={components}
       >
         {content}

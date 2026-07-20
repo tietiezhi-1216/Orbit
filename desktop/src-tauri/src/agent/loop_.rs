@@ -64,6 +64,31 @@ struct StreamUsage {
     completion_tokens: u64,
     #[serde(default)]
     total_tokens: u64,
+    /// OpenAI-standard cache reporting: `prompt_tokens_details.cached_tokens`.
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+    /// DeepSeek-style cache reporting: cache-hit prompt tokens.
+    #[serde(default)]
+    prompt_cache_hit_tokens: Option<u64>,
+}
+
+impl StreamUsage {
+    /// Prompt tokens billed from cache, normalized across the OpenAI and
+    /// DeepSeek shapes (0 when the provider reports neither).
+    fn cached_tokens(&self) -> u64 {
+        self.prompt_tokens_details
+            .as_ref()
+            .map(|d| d.cached_tokens)
+            .filter(|&c| c > 0)
+            .or(self.prompt_cache_hit_tokens)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +103,12 @@ struct StreamChoice {
 struct StreamDelta {
     #[serde(default)]
     content: Option<String>,
+    // Reasoning models stream their chain-of-thought here: `reasoning_content`
+    // (DeepSeek and most OpenAI-compatible relays) or `reasoning` (OpenRouter).
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<ToolCallDelta>>,
 }
@@ -242,11 +273,24 @@ async fn stream_once(
                             prompt_tokens: usage.prompt_tokens,
                             completion_tokens: usage.completion_tokens,
                             total_tokens,
+                            cached_tokens: usage.cached_tokens(),
                         })
                         .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
                 }
             }
             for choice in parsed.choices {
+                // Reasoning first (it precedes the answer), forwarded as its own
+                // event so it never mixes into `text`/the transcript replayed to
+                // the model.
+                if let Some(reasoning) = choice.delta.reasoning_content.or(choice.delta.reasoning) {
+                    if !reasoning.is_empty() {
+                        on_event
+                            .send(ChatEvent::Reasoning { content: reasoning })
+                            .map_err(|e| {
+                                ChatFailure::channel(format!("推送消息到界面失败：{e}"))
+                            })?;
+                    }
+                }
                 if let Some(content) = choice.delta.content {
                     if !content.is_empty() {
                         text.push_str(&content);
@@ -578,6 +622,32 @@ mod tests {
                 arguments: args.map(Into::into),
             }),
         }
+    }
+
+    fn usage(json: &str) -> StreamUsage {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn cached_tokens_reads_openai_and_deepseek_shapes() {
+        // OpenAI-standard nested shape.
+        assert_eq!(
+            usage(r#"{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":40}}"#)
+                .cached_tokens(),
+            40
+        );
+        // DeepSeek flat shape.
+        assert_eq!(
+            usage(r#"{"prompt_tokens":100,"prompt_cache_hit_tokens":24}"#).cached_tokens(),
+            24
+        );
+        // Neither reported → 0, and a zero nested value doesn't mask nothing.
+        assert_eq!(usage(r#"{"prompt_tokens":100}"#).cached_tokens(), 0);
+        assert_eq!(
+            usage(r#"{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":0}}"#)
+                .cached_tokens(),
+            0
+        );
     }
 
     #[test]

@@ -159,6 +159,10 @@ export interface AppSettings {
   /** Skills the user switched off. */
   skillsDisabled: string[];
   mcpServers: McpServer[];
+  /** Show per-reply stats inline under each assistant message; off by default. */
+  showMessageStats: boolean;
+  /** Show the model's reasoning / chain-of-thought (collapsed) above replies. */
+  showReasoning: boolean;
 }
 
 export type ChatRole = "system" | "user" | "assistant";
@@ -191,6 +195,8 @@ export interface StoredMessage {
   kind?: "message" | "toolCall" | "permission" | "error";
   role?: ChatRole;
   content?: string;
+  /** Reasoning / chain-of-thought, shown collapsed above the answer. */
+  reasoning?: string;
   attachments?: ChatAttachment[];
   error?: boolean;
   /** ms since epoch; 0 for conversations saved before messages had timestamps. */
@@ -205,6 +211,7 @@ export interface StoredMessage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  cachedTokens?: number;
   usageEstimated?: boolean;
   firstTokenMs?: number;
   durationMs?: number;
@@ -250,11 +257,13 @@ export type PermissionDecision = "allow" | "allowAlways" | "deny";
 export type ChatEvent =
   | { type: "started"; model: string }
   | { type: "delta"; content: string }
+  | { type: "reasoning"; content: string }
   | {
       type: "usage";
       promptTokens: number;
       completionTokens: number;
       totalTokens: number;
+      cachedTokens: number;
     }
   | { type: "toolCallStart"; id: string; name: string; args: unknown }
   | { type: "toolResult"; id: string; output: string; isError: boolean }

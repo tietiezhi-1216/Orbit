@@ -74,6 +74,12 @@ pub struct AppSettings {
     pub skills_disabled: Vec<String>,
     /// Configured MCP servers.
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
+    /// Show per-reply stats (model, tokens, timing) inline under each assistant
+    /// message. Off by default; the details popover is always available.
+    pub show_message_stats: bool,
+    /// Show the model's reasoning / chain-of-thought (collapsed) above replies.
+    /// Off by default; only reasoning models that stream it are affected.
+    pub show_reasoning: bool,
 
     // --- Legacy fields (pre multi-provider); read only for migration. ---
     #[serde(skip_serializing)]

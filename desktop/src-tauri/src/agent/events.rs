@@ -17,10 +17,18 @@ pub enum ChatEvent {
     Delta {
         content: String,
     },
+    /// A chunk of the model's reasoning / chain-of-thought. Rendered collapsed
+    /// above the answer and kept out of the reply text and the transcript.
+    Reasoning {
+        content: String,
+    },
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
         total_tokens: u64,
+        /// Prompt tokens served from the provider's cache (0 when unknown or
+        /// unsupported). Surfaced in the message details panel.
+        cached_tokens: u64,
     },
     ToolCallStart {
         id: String,
@@ -81,11 +89,12 @@ mod tests {
             prompt_tokens: 12,
             completion_tokens: 8,
             total_tokens: 20,
+            cached_tokens: 4,
         })
         .unwrap();
         assert_eq!(
             v,
-            json!({"type":"usage","promptTokens":12,"completionTokens":8,"totalTokens":20})
+            json!({"type":"usage","promptTokens":12,"completionTokens":8,"totalTokens":20,"cachedTokens":4})
         );
 
         let v = serde_json::to_value(ChatEvent::ToolResult {

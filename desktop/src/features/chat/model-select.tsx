@@ -11,7 +11,16 @@ import qwenIcon from "@lobehub/icons-static-svg/icons/qwen-color.svg?raw";
 import sensenovaIcon from "@lobehub/icons-static-svg/icons/sensenova-color.svg?raw";
 import xaiIcon from "@lobehub/icons-static-svg/icons/xai.svg?raw";
 import xiaomiMimoIcon from "@lobehub/icons-static-svg/icons/xiaomimimo.svg?raw";
-import { Bot, Boxes, BrainCircuit, ChevronDown, ImageIcon, Wrench } from "lucide-react";
+import {
+  Bot,
+  Boxes,
+  BrainCircuit,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ImageIcon,
+  Wrench,
+} from "lucide-react";
 import agnesIcon from "./agnes.svg?raw";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,13 +30,19 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { saveSettings } from "@/lib/api";
-import type { AppSettings, ModelInfo } from "@/lib/api";
+import type { AppSettings, ModelInfo, ReasoningEffort } from "@/lib/api";
 import {
   effectiveModelKind,
   modelHasCapability,
   modelInputModalities,
+  modelReasoning,
 } from "@/lib/model-capabilities";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -59,6 +74,8 @@ interface ModelSelectProps {
   promptText?: string;
   settings?: AppSettings;
   lockedSelection?: { providerId: string; model: string };
+  /** Reasoning effort forced by the active agent — shown read-only when set. */
+  effortOverride?: ReasoningEffort;
 }
 
 // Family rules affect presentation only. The untouched model id is always sent
@@ -153,6 +170,24 @@ function providerLabel(provider: ChatProvider): string {
   return provider.builtIn ? "tietiezhi" : provider.name;
 }
 
+const EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  auto: "auto",
+  off: "off",
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+};
+
+/** Efforts a model lets the user pick, "auto" first; empty when not selectable. */
+function selectableEfforts(model: ModelInfo): ReasoningEffort[] {
+  const reasoning = modelReasoning(model);
+  if (!reasoning || reasoning.mode !== "effort") return [];
+  return ["auto", ...reasoning.supportedEfforts.filter((effort) => effort !== "auto")];
+}
+
 function ModelFamilyIcon({ family }: { family: ModelFamily }) {
   if (family.icon) {
     return (
@@ -177,6 +212,7 @@ export function ModelSelect({
   promptText,
   settings,
   lockedSelection,
+  effortOverride,
 }: ModelSelectProps) {
   const queryClient = useQueryClient();
   const openSettings = useUiStore((s) => s.openSettings);
@@ -190,6 +226,24 @@ export function ModelSelect({
     mutationFn: async ({ providerId, model }: { providerId: string; model: string }) => {
       if (!settings) return;
       await saveSettings({ ...settings, chatProviderId: providerId, chatModel: model });
+    },
+    onSuccess: () => {
+      setOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
+  // Picking an effort from a model's hover submenu selects that model AND its
+  // effort in one go, then closes the panel.
+  const saveWithEffort = useMutation({
+    mutationFn: async (next: { providerId: string; model: string; effort: ReasoningEffort }) => {
+      if (!settings) return;
+      await saveSettings({
+        ...settings,
+        chatProviderId: next.providerId,
+        chatModel: next.model,
+        chatReasoningEffort: next.effort,
+      });
     },
     onSuccess: () => {
       setOpen(false);
@@ -280,13 +334,27 @@ export function ModelSelect({
   }
 
   const selectedModel = selectedProvider?.models.find((candidate) => candidate.id === currentModel);
-  const label = selectedModel
+
+  // The effort segment appended to the button label with a "·" separator.
+  const effortForLabel = (model: ModelInfo): string | null => {
+    const reasoning = modelReasoning(model);
+    if (!reasoning) return null;
+    if (effortOverride) return EFFORT_LABELS[effortOverride];
+    if (reasoning.mode === "fixed") return "Fixed";
+    const supported = selectableEfforts(model);
+    const configured = settings.chatReasoningEffort ?? "auto";
+    return EFFORT_LABELS[supported.includes(configured) ? configured : "auto"];
+  };
+
+  const modelText = selectedModel
     ? hasMultipleProviders && selectedProvider
       ? `${providerLabel(selectedProvider)} · ${selectedModel.id}`
       : selectedModel.id
     : lockedSelection
       ? `智能体模型不可用 · ${currentModel}`
     : "选择模型";
+  const selectedEffort = selectedModel ? effortForLabel(selectedModel) : null;
+  const label = selectedEffort ? `${modelText} · ${selectedEffort}` : modelText;
 
   return (
     <Popover
@@ -314,7 +382,7 @@ export function ModelSelect({
             "text-muted-foreground hover:text-foreground min-w-0 gap-1",
             prominent
               ? "group text-foreground h-auto max-w-[min(36rem,calc(100vw-2rem))] gap-0 bg-transparent px-0 py-1 text-lg font-semibold tracking-tight hover:!bg-transparent focus-visible:ring-0 data-[state=open]:!bg-transparent"
-              : "h-7 max-w-56 px-2 text-xs",
+              : "h-7 px-2 text-xs",
           )}
         >
           {prominent ? (
@@ -329,7 +397,7 @@ export function ModelSelect({
             </span>
           ) : (
             <>
-              <span className="truncate">{label}</span>
+              <span className="whitespace-nowrap">{label}</span>
               <ChevronDown className="size-3 shrink-0" />
             </>
           )}
@@ -340,6 +408,12 @@ export function ModelSelect({
         align={prominent ? "center" : "end"}
         side={prominent ? "top" : "bottom"}
         sideOffset={prominent ? 12 : 6}
+        onInteractOutside={(event) => {
+          // The effort hover submenu portals outside this popover. Keep the panel
+          // open while it's used; selecting an effort closes it explicitly.
+          const target = event.detail.originalEvent.target as Element | null;
+          if (target?.closest("[data-slot='hover-card-content']")) event.preventDefault();
+        }}
         className={cn(
           "gap-0 overflow-hidden p-0",
           hasMultipleProviders
@@ -421,7 +495,17 @@ export function ModelSelect({
                   {group.models.map((model) => {
                     const active =
                       group.providerId === currentProviderId && model.id === currentModel;
-                    return (
+                    const efforts = selectableEfforts(model);
+                    const canPickEffort =
+                      !effortOverride && !lockedSelection && efforts.length > 0;
+                    const configuredEffort = settings.chatReasoningEffort ?? "auto";
+                    // Tick the live effort on the active model; nothing on others.
+                    const markedEffort: ReasoningEffort | null = active
+                      ? efforts.includes(configuredEffort)
+                        ? configuredEffort
+                        : "auto"
+                      : null;
+                    const item = (
                       <CommandItem
                         key={`${group.providerId}:${model.id}`}
                         value={`${group.providerName} ${group.family.label} ${model.id}`}
@@ -429,23 +513,109 @@ export function ModelSelect({
                         onSelect={() =>
                           save.mutate({ providerId: group.providerId, model: model.id })
                         }
-                        className="items-start py-2"
+                        className={cn(
+                          "items-center py-2",
+                          // Drop shadcn's always-reserved trailing check slot
+                          // (opacity-0 but still occupies width) so the capability
+                          // icons sit flush at the row's right padding.
+                          "[&>svg:last-child]:hidden",
+                          // Mark the active model with a soft octopus-cyan tint —
+                          // lighter than a solid fill, with distinct light/dark hues.
+                          // Important keeps it from reverting to the grey
+                          // data-selected hover background.
+                          "data-[checked=true]:bg-cyan-500/10! dark:data-[checked=true]:bg-cyan-400/15!",
+                        )}
                       >
-                        <span className="min-w-0 flex-1 whitespace-normal break-all font-mono text-xs leading-5">
+                        <span className="relative min-w-0 flex-1 whitespace-normal break-all font-mono text-xs leading-5 group-data-[checked=true]/command-item:font-semibold group-data-[checked=true]/command-item:text-cyan-700 dark:group-data-[checked=true]/command-item:text-cyan-200">
                           {model.id}
+                          {/* Selected id gets a white glint sweeping across the
+                              text — a masked duplicate, same trick as the prominent
+                              model label. */}
+                          {active && (
+                            <span
+                              aria-hidden
+                              className="animate-model-label-sweep pointer-events-none absolute inset-0 text-white [filter:drop-shadow(0_0_5px_color-mix(in_oklab,white_55%,transparent))] [mask-image:linear-gradient(90deg,transparent,black_42%,black_58%,transparent)] [mask-repeat:no-repeat] [mask-size:52%_100%] motion-reduce:hidden"
+                            >
+                              {model.id}
+                            </span>
+                          )}
                         </span>
-                        <span className="text-muted-foreground flex shrink-0 items-center gap-1.5">
+                        <span className="text-muted-foreground group-data-[checked=true]/command-item:text-cyan-600 dark:group-data-[checked=true]/command-item:text-cyan-300 flex shrink-0 items-center gap-1.5">
                           {modelInputModalities(model).includes("image") && (
                             <ImageIcon aria-label="支持图片输入" className="size-3.5" />
-                          )}
-                          {modelHasCapability(model, "reasoning") && (
-                            <BrainCircuit aria-label="支持思考" className="size-3.5" />
                           )}
                           {modelHasCapability(model, "tool-call") && (
                             <Wrench aria-label="支持工具和 MCP" className="size-3.5" />
                           )}
+                          {/* Reasoning brain sits last; on hover of a pickable row it
+                              turns into the trailing arrow that reveals the submenu. */}
+                          {modelHasCapability(model, "reasoning") && (
+                            <BrainCircuit
+                              aria-label="支持思考"
+                              className={cn(
+                                "size-3.5",
+                                canPickEffort && "group-hover/command-item:hidden",
+                              )}
+                            />
+                          )}
+                          {canPickEffort && (
+                            <ChevronRight
+                              aria-hidden
+                              className="hidden size-3.5 text-cyan-600 group-hover/command-item:block dark:text-cyan-300"
+                            />
+                          )}
                         </span>
                       </CommandItem>
+                    );
+
+                    // Non-reasoning (or locked) models: plain row, no submenu.
+                    if (!canPickEffort) return item;
+
+                    // Reasoning models: hovering the row flies out an effort submenu
+                    // on the right. Picking one selects that model + effort at once.
+                    return (
+                      <HoverCard
+                        key={`${group.providerId}:${model.id}`}
+                        openDelay={80}
+                        closeDelay={140}
+                      >
+                        <HoverCardTrigger asChild>{item}</HoverCardTrigger>
+                        <HoverCardContent
+                          side="right"
+                          align="start"
+                          sideOffset={4}
+                          className="w-32 p-1"
+                        >
+                          <p className="text-muted-foreground px-2 py-1 text-xs font-medium">
+                            思考等级
+                          </p>
+                          {efforts.map((effort) => {
+                            const current = effort === markedEffort;
+                            return (
+                              <button
+                                key={effort}
+                                type="button"
+                                onClick={() =>
+                                  saveWithEffort.mutate({
+                                    providerId: group.providerId,
+                                    model: model.id,
+                                    effort,
+                                  })
+                                }
+                                className={cn(
+                                  "hover:bg-muted flex w-full items-center justify-between gap-1.5 rounded-md px-2 py-1.5 text-left text-sm",
+                                  current && "text-cyan-700 dark:text-cyan-200",
+                                )}
+                              >
+                                {EFFORT_LABELS[effort]}
+                                {current && (
+                                  <Check className="size-3.5 text-cyan-600 dark:text-cyan-300" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </HoverCardContent>
+                      </HoverCard>
                     );
                   })}
                 </CommandGroup>

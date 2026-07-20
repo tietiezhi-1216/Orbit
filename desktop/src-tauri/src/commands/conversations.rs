@@ -38,6 +38,10 @@ pub struct StoredMessage {
     pub role: String,
     #[serde(default)]
     pub content: String,
+    /// Reasoning / chain-of-thought from reasoning models, shown collapsed above
+    /// the answer. Display-only; never replayed to the model.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reasoning: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<StoredAttachment>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

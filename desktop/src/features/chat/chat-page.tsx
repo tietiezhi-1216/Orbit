@@ -36,7 +36,6 @@ import { ChannelSetupMascot } from "@/features/chat/channel-setup-mascot";
 import { attachmentKind, ChatAssetCard } from "@/features/chat/chat-asset-card";
 import { MessageItem } from "@/features/chat/message-item";
 import { ModelSelect } from "@/features/chat/model-select";
-import { ReasoningEffortSelect } from "@/features/chat/reasoning-effort-select";
 import { PermissionPrompt } from "@/features/chat/permission-prompt";
 import { ProjectSelect } from "@/features/chat/project-select";
 import { ToolCallCard } from "@/features/chat/tool-call-card";
@@ -61,11 +60,9 @@ import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat";
 import { useUiStore } from "@/stores/ui";
 
-type MascotPhase = "hero" | "docking" | "docked" | "undocking";
-
-const MASCOT_SIZE = 128;
-const MASCOT_MOVE_MS = 720;
-const MASCOT_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+// The octopus doesn't travel between spots — the hero (empty state) and dock
+// (composer) mascots simply cross-fade as the conversation starts or clears.
+type MascotPhase = "hero" | "docked";
 
 export function ChatPage() {
   const queryClient = useQueryClient();
@@ -95,7 +92,6 @@ export function ChatPage() {
   const [mascotPhase, setMascotPhase] = useState<MascotPhase>(() =>
     items.length > 0 ? "docked" : "hero",
   );
-  const [ghostVisible, setGhostVisible] = useState(false);
   const [dockVisible, setDockVisible] = useState(true);
   const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
   const [peekExpression, setPeekExpression] = useState<"open" | "closed" | "look">(
@@ -104,13 +100,8 @@ export function ChatPage() {
   const [peekHovered, setPeekHovered] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const scrollHostRef = useRef<HTMLDivElement>(null);
-  const heroMascotRef = useRef<HTMLSpanElement>(null);
   const dockMascotRef = useRef<HTMLDivElement>(null);
-  const ghostMascotRef = useRef<HTMLDivElement>(null);
-  const lastDockRectRef = useRef<DOMRect | null>(null);
   const previousHasConversationRef = useRef(items.length > 0);
-  const transitionIdRef = useRef(0);
-  const ghostAnimationRef = useRef<Animation | null>(null);
   const stickToBottomRef = useRef(true);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -122,6 +113,7 @@ export function ChatPage() {
   const startupRefreshRef = useRef(false);
 
   const settings = settingsQuery.data;
+  const showMessageStats = settings?.showMessageStats ?? false;
   const builtInProvider = settings?.providers.find((provider) => provider.builtIn);
   const startupRefresh = useMutation({
     mutationFn: (provider: Provider) =>
@@ -310,149 +302,19 @@ export function ChatPage() {
     setPeekExpression("open");
   }, [clearPeekTimers]);
 
-  const mascotTransform = useCallback(
-    (rect: DOMRect) =>
-      `translate3d(${rect.left + MASCOT_SIZE}px, ${rect.top + MASCOT_SIZE}px, 0) scale(${rect.width / MASCOT_SIZE})`,
-    [],
-  );
-
-  const primeGhost = useCallback(
-    (rect: DOMRect) => {
-      const ghost = ghostMascotRef.current;
-      if (!ghost) return;
-      ghostAnimationRef.current?.cancel();
-      setGhostVisible(true);
-      ghostAnimationRef.current = ghost.animate(
-        [{ transform: mascotTransform(rect) }, { transform: mascotTransform(rect) }],
-        { duration: 0, fill: "forwards" },
-      );
-    },
-    [mascotTransform],
-  );
-
-  const animateGhost = useCallback(
-    (
-      from: DOMRect,
-      to: DOMRect,
-      finalPhase: Extract<MascotPhase, "hero" | "docked">,
-      id: number,
-    ) => {
-      const ghost = ghostMascotRef.current;
-      if (!ghost || transitionIdRef.current !== id) return;
-
-      primeGhost(from);
-
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        setMascotPhase(finalPhase);
-        setGhostVisible(false);
-        return;
-      }
-
-      ghostAnimationRef.current?.cancel();
-      const animation = ghost.animate(
-        [
-          { transform: mascotTransform(from) },
-          { transform: mascotTransform(to) },
-        ],
-        {
-          duration: MASCOT_MOVE_MS,
-          easing: MASCOT_EASING,
-          fill: "forwards",
-        },
-      );
-      ghostAnimationRef.current = animation;
-      animation.onfinish = () => {
-        if (transitionIdRef.current !== id) return;
-        setMascotPhase(finalPhase);
-        window.requestAnimationFrame(() => {
-          if (transitionIdRef.current !== id) return;
-          setGhostVisible(false);
-        });
-      };
-    },
-    [mascotTransform, primeGhost],
-  );
-
+  // Flip the mascot between hero and dock on the first/last message. The two
+  // static mascots cross-fade in place (see their opacity transitions); there is
+  // no travelling clone anymore.
   useLayoutEffect(() => {
     const previous = previousHasConversationRef.current;
     if (previous === hasConversation) return;
     previousHasConversationRef.current = hasConversation;
-    const id = ++transitionIdRef.current;
-    let firstFrame = 0;
-    let secondFrame = 0;
-
+    setMascotPhase(hasConversation ? "docked" : "hero");
     if (hasConversation) {
-      const from = heroMascotRef.current?.getBoundingClientRect();
-      if (from) primeGhost(from);
-      setMascotPhase("docking");
       stickToBottomRef.current = true;
       endRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
-      firstFrame = window.requestAnimationFrame(() => {
-        secondFrame = window.requestAnimationFrame(() => {
-          const to = dockMascotRef.current?.getBoundingClientRect();
-          if (!from || !to) {
-            setMascotPhase("docked");
-            setGhostVisible(false);
-            return;
-          }
-          lastDockRectRef.current = to;
-          animateGhost(from, to, "docked", id);
-        });
-      });
-    } else {
-      const from = lastDockRectRef.current;
-      const fromWasVisible = from != null && from.bottom > 48 && from.top < window.innerHeight;
-      if (from && fromWasVisible) primeGhost(from);
-      setMascotPhase("undocking");
-      firstFrame = window.requestAnimationFrame(() => {
-        const to = heroMascotRef.current?.getBoundingClientRect();
-        if (!from || !to || !fromWasVisible) {
-          setMascotPhase("hero");
-          setGhostVisible(false);
-          return;
-        }
-        animateGhost(from, to, "hero", id);
-      });
     }
-
-    return () => {
-      window.cancelAnimationFrame(firstFrame);
-      window.cancelAnimationFrame(secondFrame);
-    };
-  }, [animateGhost, hasConversation, primeGhost]);
-
-  // Keep the filled transform until React has committed `visibility: hidden`.
-  // Cancelling it in the finish callback resets the fixed element to its base
-  // position before the opacity update is painted, causing a one-frame flash.
-  useLayoutEffect(() => {
-    if (ghostVisible) return;
-    ghostAnimationRef.current?.cancel();
-    ghostAnimationRef.current = null;
-  }, [ghostVisible]);
-
-  useEffect(() => {
-    const finishMovingMascot = () => {
-      const animation = ghostAnimationRef.current;
-      if (!animation || animation.playState === "idle") return;
-
-      ++transitionIdRef.current;
-      animation.cancel();
-      ghostAnimationRef.current = null;
-      setGhostVisible(false);
-      setMascotPhase(previousHasConversationRef.current ? "docked" : "hero");
-    };
-
-    window.addEventListener("resize", finishMovingMascot);
-    return () => window.removeEventListener("resize", finishMovingMascot);
-  }, []);
-
-  useEffect(
-    () => () => {
-      ghostAnimationRef.current?.cancel();
-      ghostAnimationRef.current = null;
-    },
-    [],
-  );
+  }, [hasConversation]);
   useEffect(() => {
     const clearHoveredMessage = () => setHoveredMessageKey(null);
     window.addEventListener("blur", clearHoveredMessage);
@@ -498,7 +360,6 @@ export function ChatPage() {
       const distanceFromBottom =
         viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
       stickToBottomRef.current = distanceFromBottom < 72;
-      lastDockRectRef.current = dock.getBoundingClientRect();
     };
 
     updateScrollState();
@@ -515,11 +376,6 @@ export function ChatPage() {
     };
   }, [activeId, hasConversation]);
 
-  useLayoutEffect(() => {
-    if (hasConversation && dockMascotRef.current) {
-      lastDockRectRef.current = dockMascotRef.current.getBoundingClientRect();
-    }
-  }, [hasConversation, items]);
 
   // Keep following the stream only while the reader remains near the bottom.
   const streamingRef = useRef(streaming);
@@ -715,47 +571,45 @@ export function ChatPage() {
 
   return (
     <div ref={pageRef} className="relative flex h-full flex-col overflow-hidden">
-      <div
-        ref={ghostMascotRef}
-        aria-hidden
-        className={cn(
-          "pointer-events-none fixed -top-32 -left-32 z-50 origin-top-left",
-          ghostVisible ? "visible opacity-100 will-change-transform" : "invisible opacity-0",
-        )}
-      >
-        <AppIconLoader active={false} idle={false} />
-      </div>
-
       <div className="relative min-h-0 flex-1">
         <div
           aria-hidden={hasConversation}
           className={cn(
-            "absolute inset-0 flex flex-col items-center justify-center px-4 text-center transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none",
-            hasConversation
-              ? "pointer-events-none -translate-y-1 opacity-0"
-              : "translate-y-0 opacity-100",
+            // Fade only — no vertical slide. The slide moved the hero mascot
+            // mid-flight, so the flying ghost snapshotted an unsettled target
+            // and the octopus jumped a few px when it took back over.
+            "absolute inset-0 flex flex-col items-center justify-center px-4 text-center transition-opacity duration-300 ease-out motion-reduce:transition-none",
+            hasConversation ? "pointer-events-none opacity-0" : "opacity-100",
           )}
         >
           {ready ? (
             <div className="flex flex-col items-center gap-1">
-              <ChannelSetupMascot
-                mascotRef={heroMascotRef}
+              {/* Cross-fades with the dock mascot. The opacity lives on this
+                  wrapper, not the mascot itself — the mascot's mount
+                  `animate-channel-arrive` pins its own opacity to 1 and would
+                  override an opacity class placed directly on it. */}
+              <div
                 className={cn(
-                  "h-56 w-80 transition-opacity duration-200 motion-reduce:transition-none",
+                  "transition-opacity duration-300 ease-out",
                   mascotPhase === "hero" ? "opacity-100" : "opacity-0",
                 )}
-                mascotClassName="size-32"
               >
-                <AppIconLoader
-                  active={false}
-                  idle={!hasConversation && mascotPhase === "hero"}
-                />
-              </ChannelSetupMascot>
+                <ChannelSetupMascot
+                  motionPaused={mascotPhase !== "hero"}
+                  className="h-56 w-80"
+                  mascotClassName="size-32"
+                >
+                  <AppIconLoader
+                    active={false}
+                    idle={!hasConversation && mascotPhase === "hero"}
+                  />
+                </ChannelSetupMascot>
+              </div>
               <p className="text-lg font-semibold">开始新任务</p>
             </div>
           ) : (
             <div className="flex select-none flex-col items-center">
-              <ChannelSetupMascot mascotRef={heroMascotRef} />
+              <ChannelSetupMascot />
               {readiness === "choose-model" && settings ? (
                 <div className="mt-1 flex justify-center">
                   <ModelSelect
@@ -860,6 +714,12 @@ export function ChatPage() {
                     showActions={
                       item.role !== "assistant" || assistantTurnTailIds.has(item.id)
                     }
+                    showStats={showMessageStats}
+                    showReasoning={settings?.showReasoning ?? false}
+                    streaming={streaming && index === items.length - 1}
+                    providerName={
+                      settings?.providers.find((p) => p.id === item.providerId)?.name
+                    }
                     onBranch={branchFrom}
                     onEdit={handleEdit}
                     onHoverChange={handleMessageHoverChange}
@@ -875,7 +735,12 @@ export function ChatPage() {
                 className="mt-auto flex min-h-14 items-center gap-2"
               >
                 <div ref={dockMascotRef} className="relative size-12 shrink-0">
-                  <div className={mascotPhase === "docked" ? "opacity-100" : "opacity-0"}>
+                  <div
+                    className={cn(
+                      "transition-opacity duration-300 ease-out",
+                      mascotPhase === "docked" ? "opacity-100" : "opacity-0",
+                    )}
+                  >
                     <AppIconLoader
                       active={indicatorActive && mascotPhase === "docked" && dockVisible}
                       className="origin-top-left scale-[0.375]"
@@ -888,7 +753,7 @@ export function ChatPage() {
                   className={cn(
                     "text-muted-foreground flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs tabular-nums transition-[opacity,transform] duration-300",
                     streaming && mascotPhase === "docked"
-                      ? "translate-x-0 opacity-100"
+                      ? "text-shimmer translate-x-0 opacity-100"
                       : "-translate-x-1 opacity-0",
                   )}
                 >
@@ -1060,12 +925,6 @@ export function ChatPage() {
               <ModelSelect
                 settings={settings}
                 lockedSelection={lockedAgentSelection}
-              />
-            )}
-            {settings && selectedChat && (
-              <ReasoningEffortSelect
-                settings={settings}
-                model={selectedChat.modelInfo}
                 effortOverride={activeAgent?.reasoningEffort || undefined}
               />
             )}

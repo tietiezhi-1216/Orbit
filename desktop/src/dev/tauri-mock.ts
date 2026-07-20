@@ -188,6 +188,12 @@ export function installTauriMock(): void {
   ) => {
     let i = 0;
     push(channel, i++, { message: { type: "started", model } });
+    const reasoning = "让我想想用户到底想问什么。\n先拆解意图，再决定用什么结构回答，最后检查一遍。";
+    for (const ch of reasoning) {
+      if (state.cancelled.has(requestId)) break;
+      push(channel, i++, { message: { type: "reasoning", content: ch } });
+      await sleep(8);
+    }
     for (const ch of reply) {
       if (state.cancelled.has(requestId)) break;
       push(channel, i++, { message: { type: "delta", content: ch } });
@@ -199,6 +205,7 @@ export function installTauriMock(): void {
         promptTokens: 28,
         completionTokens: Math.ceil(reply.length / 3),
         totalTokens: 28 + Math.ceil(reply.length / 3),
+        cachedTokens: 0,
       },
     });
     push(channel, i++, {
@@ -249,7 +256,7 @@ export function installTauriMock(): void {
       emit({ type: "delta", content: ch });
       await sleep(20);
     }
-    emit({ type: "usage", promptTokens: 96, completionTokens: 31, totalTokens: 127 });
+    emit({ type: "usage", promptTokens: 96, completionTokens: 31, totalTokens: 127, cachedTokens: 24 });
     emit({ type: "done", cancelled: state.cancelled.has(requestId) });
     push(channel, i, { end: true });
     state.cancelled.delete(requestId);

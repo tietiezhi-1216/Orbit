@@ -48,7 +48,14 @@ export const ToolCallCard = memo(function ToolCallCard({
             <XCircle className="text-destructive size-3.5 shrink-0" />
           )}
           <Wrench className="text-muted-foreground size-3.5 shrink-0" />
-          <span className="truncate font-mono text-xs font-medium">{item.name}</span>
+          <span
+            className={cn(
+              "truncate font-mono text-xs font-medium",
+              running && "text-shimmer",
+            )}
+          >
+            {item.name}
+          </span>
           <Badge
             variant={item.status === "error" ? "destructive" : "secondary"}
             className="ml-auto shrink-0 text-[10px]"

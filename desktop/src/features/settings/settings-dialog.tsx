@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   Archive,
@@ -21,7 +21,10 @@ import {
 import { AppIcon } from "@/components/app-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { loadSettings, saveSettings } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
 import type { Theme } from "@/components/theme-provider";
 import { DictationModelSection } from "@/features/settings/dictation-card";
@@ -173,19 +176,74 @@ const THEME_OPTIONS: ThemeOption[] = [
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
+  const queryClient = useQueryClient();
+  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: loadSettings });
+  const settings = settingsQuery.data;
+
+  const saveStats = useMutation({
+    mutationFn: async (showMessageStats: boolean) => {
+      if (!settings) return;
+      await saveSettings({ ...settings, showMessageStats });
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  });
+
+  const saveReasoning = useMutation({
+    mutationFn: async (showReasoning: boolean) => {
+      if (!settings) return;
+      await saveSettings({ ...settings, showReasoning });
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  });
+
   return (
     <SettingsSection>
-      <div className="flex gap-2">
-        {THEME_OPTIONS.map((opt) => (
-          <Button
-            key={opt.value}
-            variant={theme === opt.value ? "default" : "outline"}
-            size="sm"
-            onClick={() => setTheme(opt.value)}
-          >
-            <opt.icon /> {opt.label}
-          </Button>
-        ))}
+      <div className="flex flex-col gap-2">
+        <Label>主题</Label>
+        <div className="flex gap-2">
+          {THEME_OPTIONS.map((opt) => (
+            <Button
+              key={opt.value}
+              variant={theme === opt.value ? "default" : "outline"}
+              size="sm"
+              onClick={() => setTheme(opt.value)}
+            >
+              <opt.icon /> {opt.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <Separator />
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="show-message-stats">在消息下方显示统计信息</Label>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            开启后直接展示模型、Token、生成速度和耗时；关闭时只显示时间，点每条回复的「详情」按钮仍可查看完整信息（含输入/输出、缓存命中等）。
+          </p>
+        </div>
+        <Switch
+          id="show-message-stats"
+          className="mt-0.5 shrink-0"
+          checked={settings?.showMessageStats ?? false}
+          disabled={!settings}
+          onCheckedChange={(checked) => saveStats.mutate(checked)}
+        />
+      </div>
+      <Separator />
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="show-reasoning">显示模型思考过程</Label>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            开启后，会在支持思考的模型回复上方折叠展示其思考过程；关闭则完全隐藏。仅对会返回思考内容的模型生效。
+          </p>
+        </div>
+        <Switch
+          id="show-reasoning"
+          className="mt-0.5 shrink-0"
+          checked={settings?.showReasoning ?? false}
+          disabled={!settings}
+          onCheckedChange={(checked) => saveReasoning.mutate(checked)}
+        />
       </div>
     </SettingsSection>
   );

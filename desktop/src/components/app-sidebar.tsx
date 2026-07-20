@@ -542,7 +542,10 @@ function TaskRow({
             nested && "pl-8",
           )}
         >
-          <span className="truncate">{task.title}</span>
+          {/* Pin the weight so the active row differs only by colour, not by
+              font-weight — otherwise the base sidebar's data-active:font-medium
+              widens the text and shifts where a long title truncates. */}
+          <span className="truncate font-normal">{task.title}</span>
         </SidebarMenuButton>
         <div className="pointer-events-none absolute top-0.5 right-1 flex items-center opacity-0 transition-opacity delay-0 duration-300 ease-out group-hover/task-row:pointer-events-auto group-hover/task-row:opacity-100 group-hover/task-row:delay-150 group-focus-within/task-row:pointer-events-auto group-focus-within/task-row:opacity-100 motion-reduce:transition-none">
           <Button

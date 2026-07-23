@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+
+use super::workspace::TaskMode;
 
 pub const DEFAULT_CONVERSATION_TITLE: &str = "新会话";
 
@@ -88,6 +91,18 @@ pub struct StoredMessage {
     pub error_retryable: bool,
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub error_retries: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_automatic: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens_before: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens_after: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 fn default_kind() -> String {
@@ -117,6 +132,9 @@ pub struct Conversation {
     /// Empty means a standalone task with its own managed workspace.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub project_id: String,
+    /// Work and Code share this transcript but resolve different writable roots.
+    #[serde(default)]
+    pub task_mode: TaskMode,
     /// Zero means active; otherwise the time this task was archived.
     #[serde(default)]
     pub archived_at: u64,
@@ -135,8 +153,26 @@ pub struct ConversationMeta {
     pub title: String,
     pub updated_at: u64,
     pub project_id: String,
+    pub task_mode: TaskMode,
     pub archived_at: u64,
     pub pinned_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionTaskDigest {
+    pub id: String,
+    pub title: String,
+    pub updated_at: u64,
+    pub opening_request: String,
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionHistory {
+    pub total_tasks: usize,
+    pub recent_tasks: Vec<SuggestionTaskDigest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -312,6 +348,7 @@ fn list_conversation_metas(
             title: conversation.title,
             updated_at: conversation.updated_at,
             project_id: conversation.project_id,
+            task_mode: conversation.task_mode,
             archived_at: conversation.archived_at,
             pinned_at: conversation.pinned_at,
         });
@@ -322,6 +359,79 @@ fn list_conversation_metas(
         metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     }
     Ok(metas)
+}
+
+pub(crate) fn suggestion_history(
+    app: &AppHandle,
+    project_id: Option<&str>,
+    task_mode: TaskMode,
+    limit: usize,
+) -> Result<SuggestionHistory, String> {
+    with_store(app, || {
+        let expected_project_id = project_id.unwrap_or("");
+        let entries =
+            std::fs::read_dir(tasks_dir(app)?).map_err(|e| format!("读取任务目录失败：{e}"))?;
+        let mut tasks = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path().join("task.json");
+            let Ok(raw) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let Ok(conversation) = serde_json::from_str::<Conversation>(&raw) else {
+                continue;
+            };
+            if conversation.project_id != expected_project_id || conversation.task_mode != task_mode
+            {
+                continue;
+            }
+            let opening_request = conversation
+                .messages
+                .iter()
+                .find(|message| {
+                    message.kind == "message"
+                        && message.role == "user"
+                        && !message.content.trim().is_empty()
+                })
+                .map(|message| compact_excerpt(&message.content, 180))
+                .unwrap_or_default();
+            let tools: BTreeSet<String> = conversation
+                .messages
+                .iter()
+                .filter_map(|message| message.tool_name.clone())
+                .take(8)
+                .collect();
+            tasks.push(SuggestionTaskDigest {
+                id: conversation.id,
+                title: conversation.title,
+                updated_at: conversation.updated_at,
+                opening_request,
+                tools: tools.into_iter().collect(),
+            });
+        }
+        tasks.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        let total_tasks = tasks.len();
+        tasks.truncate(limit);
+        Ok(SuggestionHistory {
+            total_tasks,
+            recent_tasks: tasks,
+        })
+    })
+}
+
+fn compact_excerpt(value: &str, limit: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let redacted = sensitive_value_pattern().replace_all(&compact, "[已隐藏]");
+    redacted.chars().take(limit).collect()
+}
+
+fn sensitive_value_pattern() -> &'static regex::Regex {
+    static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(?:sk|pk)-[a-z0-9_-]{8,}|(?:api[_ -]?key|access[_ -]?token|token|password|passwd|secret)\s*[:=]\s*[^\s,;]+",
+        )
+        .expect("sensitive value pattern must be valid")
+    })
 }
 
 #[tauri::command]
@@ -478,7 +588,7 @@ pub fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
             .and_then(|raw| serde_json::from_str::<Conversation>(&raw).ok())
             .map(|conversation| conversation.project_id)
             .unwrap_or_default();
-        super::workspace::cleanup_legacy_task_worktree(&app, &project_id, &root.join("workspace"));
+        super::workspace::cleanup_task_workspaces(&app, &project_id, &root);
         std::fs::remove_dir_all(root).map_err(|e| format!("删除任务失败：{e}"))
     })
 }
@@ -538,6 +648,7 @@ mod tests {
         let conversation: Conversation = serde_json::from_str(json).unwrap();
         assert_eq!(conversation.archived_at, 0);
         assert_eq!(conversation.pinned_at, 0);
+        assert_eq!(conversation.task_mode, TaskMode::Code);
     }
 
     #[test]
@@ -576,5 +687,14 @@ mod tests {
         let mut explicit = "用户命名".to_string();
         preserve_generated_title(&mut explicit, "AI 标题");
         assert_eq!(explicit, "用户命名");
+    }
+
+    #[test]
+    fn suggestion_excerpt_redacts_likely_secrets() {
+        let excerpt = compact_excerpt(
+            "请检查 API_KEY=top-secret-value 和 sk-1234567890abcdef 是否泄漏",
+            180,
+        );
+        assert_eq!(excerpt, "请检查 [已隐藏] 和 [已隐藏] 是否泄漏");
     }
 }

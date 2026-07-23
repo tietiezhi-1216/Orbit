@@ -19,7 +19,7 @@ import {
   Square,
   Wrench,
 } from "lucide-react";
-import { AppIconLoader } from "@/components/app-icon-loader";
+import { ProductMascotMotion } from "@/components/product-mascot-motion";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,10 +34,17 @@ import {
 import { ErrorNotice } from "@/features/chat/error-notice";
 import { ChannelSetupMascot } from "@/features/chat/channel-setup-mascot";
 import { attachmentKind, ChatAssetCard } from "@/features/chat/chat-asset-card";
+import {
+  CHAT_COMPOSER_TEXTAREA_CLASS,
+  ChatComposerSurface,
+} from "@/features/chat/chat-composer-surface";
+import { ContextCommandMenu } from "@/features/chat/context-command-menu";
+import { ContextNotice } from "@/features/chat/context-notice";
 import { MessageItem } from "@/features/chat/message-item";
 import { ModelSelect } from "@/features/chat/model-select";
 import { PermissionPrompt } from "@/features/chat/permission-prompt";
 import { ProjectSelect } from "@/features/chat/project-select";
+import { StarterSuggestions } from "@/features/chat/starter-suggestions";
 import { ToolCallCard } from "@/features/chat/tool-call-card";
 import {
   dictationToggle,
@@ -46,8 +53,10 @@ import {
   inspectChatAssetPaths,
   listAgents,
   loadSettings,
+  markProjectSuggestionUsed,
   pickChatFiles,
   pickChatFolder,
+  projectRecommendations,
   saveSettings,
 } from "@/lib/api";
 import type { ChatAttachment, Provider } from "@/lib/api";
@@ -56,8 +65,10 @@ import {
   modelHasCapability,
   modelInputModalities,
 } from "@/lib/model-capabilities";
+import { getTaskMode } from "@/lib/task-mode";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat";
+import { useProjectStore } from "@/stores/projects";
 import { useUiStore } from "@/stores/ui";
 
 // The octopus doesn't travel between spots — the hero (empty state) and dock
@@ -71,17 +82,29 @@ export function ChatPage() {
   const openSettings = useUiStore((s) => s.openSettings);
   const activeId = useChatStore((s) => s.activeId);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const projectId = useChatStore((s) => s.projectId);
+  const taskMode = useChatStore((s) => s.taskMode);
   const draftVersion = useChatStore((s) => s.draftVersion);
   const items = useChatStore((s) => s.items);
   const streaming = useChatStore((s) => s.streaming);
   const streamStartedAt = useChatStore((s) => s.streamStartedAt);
   const streamModel = useChatStore((s) => s.streamModel);
   const streamRetry = useChatStore((s) => s.streamRetry);
+  const streamActivity = useChatStore((s) => s.streamActivity);
   const send = useChatStore((s) => s.send);
   const stop = useChatStore((s) => s.stop);
   const branchFrom = useChatStore((s) => s.branchFrom);
   const editAndResend = useChatStore((s) => s.editAndResend);
   const retryFromError = useChatStore((s) => s.retryFromError);
+  const projects = useProjectStore((s) => s.projects);
+  const selectedProject = projects.find((project) => project.id === projectId);
+  const suggestionsEnabled = settingsQuery.data?.smartSuggestionsEnabled === true;
+  const recommendationsQuery = useQuery({
+    queryKey: ["project-recommendations", projectId, taskMode, draftVersion],
+    queryFn: () => projectRecommendations(projectId, taskMode),
+    enabled: suggestionsEnabled && items.length === 0,
+    staleTime: Infinity,
+  });
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -103,7 +126,6 @@ export function ChatPage() {
   const dockMascotRef = useRef<HTMLDivElement>(null);
   const previousHasConversationRef = useRef(items.length > 0);
   const stickToBottomRef = useRef(true);
-  const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** IME state — see `isImeEnter` for why both of these are needed. */
   const composingRef = useRef(false);
@@ -145,6 +167,8 @@ export function ChatPage() {
       option.providerId === settings?.chatProviderId && option.model === settings?.chatModel,
   );
   const activeAgent = agentsQuery.data?.find((agent) => agent.id === activeAgentId);
+  const taskModeDefinition = getTaskMode(taskMode);
+  const starterSuggestions = recommendationsQuery.data?.suggestions ?? [];
   const lockedAgentSelection = activeAgent?.model
     ? {
         providerId: activeAgent.modelProviderId || settings?.chatProviderId || "",
@@ -222,12 +246,15 @@ export function ChatPage() {
             ? "获取聊天模型后即可输入消息"
             : readiness === "choose-model"
               ? "选择聊天模型后即可输入消息"
-              : "输入消息…";
+              : taskMode === "work"
+                ? "描述需要研究、整理或交付的工作…"
+                : "描述需要分析、修改或验证的代码任务…";
   const lastItem = items[items.length - 1];
   const waitingForPermission =
     lastItem?.kind === "permission" && lastItem.decision == null;
-  const indicatorActive = streaming && !waitingForPermission;
   const hasConversation = items.length > 0;
+  const suggestionsLoading =
+    suggestionsEnabled && !hasConversation && recommendationsQuery.isPending;
 
   useEffect(() => {
     if (!builtInProvider || startupRefreshRef.current) return;
@@ -267,11 +294,15 @@ export function ChatPage() {
     lastItem?.kind === "toolCall" && lastItem.status === "running" ? lastItem.name : null;
   const streamStatus = streamRetry
     ? `正在进行第 ${streamRetry.attempt}/${streamRetry.maxRetries} 次重试 · ${streamRetry.reason}`
-    : waitingForPermission
-      ? "等待授权"
-      : runningTool
-        ? `正在运行 ${runningTool}`
-        : "正在生成";
+    : streamActivity === "compacting"
+      ? "正在压缩上下文"
+      : streamActivity === "inspecting"
+        ? "正在计算上下文"
+        : waitingForPermission
+          ? "等待授权"
+          : runningTool
+            ? `正在运行 ${runningTool}`
+            : "正在生成";
   const peekVisible = hasConversation && mascotPhase === "docked" && !dockVisible;
   const peekImage =
     peekExpression === "closed"
@@ -302,6 +333,16 @@ export function ChatPage() {
     setPeekExpression("open");
   }, [clearPeekTimers]);
 
+  // Every bottom-scroll goes to the true bottom (incl. trailing padding), the
+  // same target the streaming pin uses — a mixed target would shift the docked
+  // mascot by the padding height when a reply settles.
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    const viewport = scrollHostRef.current?.querySelector<HTMLElement>(
+      "[data-slot='scroll-area-viewport']",
+    );
+    viewport?.scrollTo({ top: viewport.scrollHeight, behavior });
+  }, []);
+
   // Flip the mascot between hero and dock on the first/last message. The two
   // static mascots cross-fade in place (see their opacity transitions); there is
   // no travelling clone anymore.
@@ -312,9 +353,9 @@ export function ChatPage() {
     setMascotPhase(hasConversation ? "docked" : "hero");
     if (hasConversation) {
       stickToBottomRef.current = true;
-      endRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
+      scrollToBottom("instant");
     }
-  }, [hasConversation]);
+  }, [hasConversation, scrollToBottom]);
   useEffect(() => {
     const clearHoveredMessage = () => setHoveredMessageKey(null);
     window.addEventListener("blur", clearHoveredMessage);
@@ -359,11 +400,25 @@ export function ChatPage() {
       setHoveredMessageKey(null);
       const distanceFromBottom =
         viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-      stickToBottomRef.current = distanceFromBottom < 72;
+      // Hysteresis, not a single threshold: unstick only once clearly away,
+      // re-stick only at the true bottom. A symmetric cutoff re-sticks on the
+      // reader's first small upward move (40px < 72px) and the next flush
+      // yanks them back down — an endless tug-of-war while streaming.
+      if (distanceFromBottom > 72) stickToBottomRef.current = false;
+      else if (distanceFromBottom < 4) stickToBottomRef.current = true;
+    };
+
+    // Scroll events land asynchronously, so during a stream the next flush can
+    // pin the view back down before updateScrollState ever sees the reader's
+    // upward move. Treat upward wheel intent as an immediate unstick;
+    // updateScrollState re-sticks once the reader returns to the bottom.
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) stickToBottomRef.current = false;
     };
 
     updateScrollState();
     viewport.addEventListener("scroll", updateScrollState, { passive: true });
+    viewport.addEventListener("wheel", handleWheel, { passive: true });
     const observer = new IntersectionObserver(
       ([entry]) => setDockVisible(entry.isIntersecting && entry.intersectionRatio >= 0.35),
       { root: viewport, threshold: [0, 0.35, 1] },
@@ -372,6 +427,7 @@ export function ChatPage() {
 
     return () => {
       viewport.removeEventListener("scroll", updateScrollState);
+      viewport.removeEventListener("wheel", handleWheel);
       observer.disconnect();
     };
   }, [activeId, hasConversation]);
@@ -382,11 +438,10 @@ export function ChatPage() {
   streamingRef.current = streaming;
   useEffect(() => {
     if (!stickToBottomRef.current) return;
-    endRef.current?.scrollIntoView({
-      behavior: streamingRef.current ? "instant" : "smooth",
-      block: "end",
-    });
-  }, [items]);
+    // Streaming pins instantly so a reader at the bottom never sees a yank;
+    // a settled reply glides the last stretch smoothly.
+    scrollToBottom(streamingRef.current ? "instant" : "smooth");
+  }, [items, scrollToBottom]);
 
   // Stable handler so the memoized MessageItem list doesn't re-render per flush.
   const handleEdit = useCallback(
@@ -438,6 +493,10 @@ export function ChatPage() {
     setAttachmentError("");
     void send(providerId, model, text, pendingAttachments);
   };
+  const commandQuery =
+    !streaming && attachments.length === 0 && input.trimStart().startsWith("/")
+      ? input.trimStart()
+      : null;
 
   const appendAssets = useCallback(
     (incoming: ChatAttachment[]) => {
@@ -583,7 +642,7 @@ export function ChatPage() {
           )}
         >
           {ready ? (
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex w-full max-w-3xl flex-col items-center gap-1">
               {/* Cross-fades with the dock mascot. The opacity lives on this
                   wrapper, not the mascot itself — the mascot's mount
                   `animate-channel-arrive` pins its own opacity to 1 and would
@@ -598,14 +657,35 @@ export function ChatPage() {
                   motionPaused={mascotPhase !== "hero"}
                   className="h-56 w-80"
                   mascotClassName="size-32"
-                >
-                  <AppIconLoader
-                    active={false}
-                    idle={!hasConversation && mascotPhase === "hero"}
-                  />
-                </ChannelSetupMascot>
+                />
               </div>
-              <p className="text-lg font-semibold">开始新任务</p>
+              <p className="h-7 max-w-full truncate px-4 text-lg font-semibold">
+                {selectedProject?.name ??
+                  `在独立 ${taskMode === "work" ? "Work" : "Code"} 空间开始任务`}
+              </p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {taskModeDefinition.emptyDescription}
+              </p>
+              {suggestionsEnabled &&
+                (starterSuggestions.length > 0 || suggestionsLoading) && (
+                  <StarterSuggestions
+                    suggestions={starterSuggestions}
+                    projectName={selectedProject?.name}
+                    technologies={recommendationsQuery.data?.technologies}
+                    loading={suggestionsLoading}
+                    onSelect={(suggestion) => {
+                      setInput(suggestion.prompt);
+                      void markProjectSuggestionUsed(
+                        projectId,
+                        taskMode,
+                        suggestion.id,
+                      ).catch((error: unknown) => {
+                        console.warn("记录任务建议使用失败：", errorMessage(error));
+                      });
+                      window.requestAnimationFrame(() => inputRef.current?.focus());
+                    }}
+                  />
+                )}
             </div>
           ) : (
             <div className="flex select-none flex-col items-center">
@@ -689,10 +769,12 @@ export function ChatPage() {
           )}
         >
           <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:h-full">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 px-4 pt-6 pb-6">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 px-4 pt-6 pb-4">
               {items.map((item, index) => {
                 const hoverKey = `${item.id}:${index}:${item.createdAt}`;
-                return item.kind === "toolCall" ? (
+                return item.kind === "context" ? (
+                  <ContextNotice key={item.id} item={item} />
+                ) : item.kind === "toolCall" ? (
                   <ToolCallCard key={item.id} item={item} />
                 ) : item.kind === "permission" ? (
                   <PermissionPrompt key={item.id} item={item} />
@@ -732,21 +814,23 @@ export function ChatPage() {
                 aria-label={
                   streaming ? `${streamStatus}，已用时 ${elapsedSeconds} 秒` : "铁铁汁就绪"
                 }
-                className="mt-auto flex min-h-14 items-center gap-2"
+                className="mt-auto flex h-12 items-center gap-2"
               >
-                <div ref={dockMascotRef} className="relative size-12 shrink-0">
-                  <div
+                {/* Keep the dock mascot clipped to the fixed status row so its
+                    continuous canvas deformation never changes scroll bounds. */}
+                <div ref={dockMascotRef} className="relative size-12 shrink-0 overflow-hidden">
+                  <ProductMascotMotion
+                    src="/mode-mascots/paper-plane/code.png"
+                    blinkSrc="/mode-mascots/paper-plane/code-blink.png"
+                    variant="workspace"
                     className={cn(
-                      "transition-opacity duration-300 ease-out",
+                      "size-12 transition-opacity duration-300 ease-out",
                       mascotPhase === "docked" ? "opacity-100" : "opacity-0",
                     )}
-                  >
-                    <AppIconLoader
-                      active={indicatorActive && mascotPhase === "docked" && dockVisible}
-                      className="origin-top-left scale-[0.375]"
-                      idle={hasConversation && mascotPhase === "docked" && dockVisible}
-                    />
-                  </div>
+                    paused={
+                      !hasConversation || mascotPhase !== "docked" || !dockVisible
+                    }
+                  />
                 </div>
                 <span
                   aria-hidden
@@ -768,7 +852,6 @@ export function ChatPage() {
                   )}
                 </span>
               </div>
-              <div ref={endRef} />
             </div>
           </ScrollArea>
         </div>
@@ -779,12 +862,19 @@ export function ChatPage() {
           removed model can be replaced without losing context. */}
       {(ready || hasConversation) && (
       <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
+        {/* Soften the transcript → composer boundary. Capped at 60% so the
+            resting mascot right above the composer reads as standing on a soft
+            shadow instead of sinking into solid black. */}
+        <div
+          aria-hidden
+          className="to-background/60 pointer-events-none absolute inset-x-0 -top-10 h-10 bg-linear-to-b from-transparent"
+        />
         <Button
           variant="ghost"
           size="sm"
           onClick={() => {
             stickToBottomRef.current = true;
-            endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+            scrollToBottom("smooth");
           }}
           onMouseEnter={startPeekReaction}
           onMouseLeave={stopPeekReaction}
@@ -823,12 +913,17 @@ export function ChatPage() {
           </div>
         )}
 
-        <div
-          className={cn(
-            "border-input bg-background focus-within:border-ring focus-within:ring-ring/30 relative z-20 flex flex-col rounded-2xl border px-2 pt-1.5 pb-1.5 shadow-sm transition-colors focus-within:ring-[3px]",
-            dragActive && "border-primary ring-primary/25 ring-[3px]",
+        <ChatComposerSurface dragActive={dragActive}>
+          {commandQuery != null && (
+            <ContextCommandMenu
+              query={commandQuery}
+              onSelect={(command) => {
+                stickToBottomRef.current = true;
+                setInput("");
+                void send(providerId, model, command);
+              }}
+            />
           )}
-        >
           {dragActive && (
             <div className="bg-background/90 text-foreground pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl text-sm font-medium backdrop-blur-sm">
               松开即可添加到本轮上下文
@@ -874,7 +969,7 @@ export function ChatPage() {
             }}
             placeholder={composerPlaceholder}
             disabled={!ready}
-            className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
+            className={CHAT_COMPOSER_TEXTAREA_CLASS}
             rows={1}
           />
 
@@ -919,7 +1014,12 @@ export function ChatPage() {
               </DropdownMenuContent>
             </DropdownMenu>
             <span className="text-muted-foreground flex-1 truncate text-[11px]">
-              {attachmentStatus || (ready ? "Enter 发送 · Shift+Enter 换行" : setupDescription)}
+              {attachmentStatus ||
+                (commandQuery != null
+                  ? "/compact 压缩 · /context 查看占用"
+                  : ready
+                    ? "Enter 发送 · Shift+Enter 换行"
+                    : setupDescription)}
             </span>
             {settings && (
               <ModelSelect
@@ -976,7 +1076,7 @@ export function ChatPage() {
               </>
             )}
           </div>
-        </div>
+        </ChatComposerSurface>
       </div>
       )}
     </div>

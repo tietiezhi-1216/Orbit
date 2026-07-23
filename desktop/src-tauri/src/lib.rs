@@ -1,4 +1,5 @@
 mod agent;
+mod automation;
 mod commands;
 mod mcp;
 mod permission;
@@ -11,16 +12,22 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 pub struct AppState {
     pub(crate) http: reqwest::Client,
     /// Cancellation tokens of in-flight chat streams, keyed by request id.
     pub(crate) chat_cancels: Mutex<HashMap<u32, CancellationToken>>,
+    /// Cancellation tokens of in-flight media generation jobs.
+    pub(crate) create_cancels: Mutex<HashMap<u32, CancellationToken>>,
     /// Routes tool-permission answers back to blocked agent loops.
     pub(crate) permissions: permission::PermissionBroker,
     /// App-global MCP server connections (lazy-started).
     pub(crate) mcp: mcp::McpManager,
+    /// Persistent connections that expose this install as a device node to
+    /// every configured remote Core.
+    pub(crate) device_fabric: commands::devices::DeviceFabric,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,8 +60,10 @@ pub fn run() {
         .manage(AppState {
             http,
             chat_cancels: Mutex::new(HashMap::new()),
+            create_cancels: Mutex::new(HashMap::new()),
             permissions: permission::PermissionBroker::default(),
             mcp: mcp::McpManager::default(),
+            device_fabric: commands::devices::DeviceFabric::default(),
         })
         .manage(commands::hotkey::HotkeyState::default())
         .setup(|app| {
@@ -65,9 +74,20 @@ pub fn run() {
                 eprintln!("[capsule] {e}");
             }
             commands::hotkey::apply_from_settings(&handle);
+            let state = app.state::<AppState>();
+            if let Err(error) = state.device_fabric.sync_from_store(&handle) {
+                eprintln!("[device] {error}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::automations::list_automations,
+            commands::automations::load_automation,
+            commands::automations::create_automation,
+            commands::automations::save_automation,
+            commands::automations::validate_automation,
+            commands::automations::archive_automation,
+            commands::automations::delete_automation,
             commands::settings::load_settings,
             commands::settings::save_settings,
             commands::providers::list_providers,
@@ -75,11 +95,24 @@ pub fn run() {
             commands::providers::upsert_provider,
             commands::providers::delete_provider,
             commands::providers::fetch_provider_models,
+            commands::create::generate_create_image,
+            commands::create::generate_create_video,
+            commands::create::cancel_create_generation,
+            commands::create::read_create_asset_data_url,
+            commands::create::export_create_asset,
+            commands::create::delete_create_asset,
             commands::chat::chat_stream,
+            commands::chat::tietiezhi_stream,
             commands::chat::chat_cancel,
             commands::dictation::transcribe,
             commands::dictation::polish_stream,
             commands::dictation::default_polish_prompt,
+            commands::devices::list_device_cores,
+            commands::devices::add_device_core,
+            commands::devices::remove_device_core,
+            commands::devices::probe_device_core,
+            commands::devices::list_connected_devices,
+            commands::devices::invoke_device,
             commands::hotkey::dictation_reset,
             commands::hotkey::dictation_toggle,
             commands::hotkey::set_dictation_hotkey,
@@ -101,6 +134,9 @@ pub fn run() {
             commands::projects::touch_project,
             commands::projects::rename_project,
             commands::projects::reveal_project,
+            commands::projects::project_recommendations,
+            commands::projects::refresh_project_recommendations,
+            commands::projects::mark_project_suggestion_used,
             commands::capsule::capsule_set_height,
             commands::capsule::hide_capsule,
             commands::capsule::show_capsule,
@@ -114,6 +150,8 @@ pub fn run() {
             commands::skills::set_skill_enabled,
             commands::skills::import_skill,
             commands::workspace::pick_workspace_dir,
+            commands::workspace::task_workspace_overview,
+            commands::workspace::transfer_task_workspace_file,
             commands::assets::pick_chat_files,
             commands::assets::pick_chat_folder,
             commands::assets::inspect_chat_asset_paths,

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -8,8 +9,12 @@ use tauri::ipc::Channel;
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::context::{
+    build_compaction_transcript, compaction_threshold, estimate_payload_tokens, should_compact,
+    summary_message, truncate_summary, ContextAction, DEFAULT_CONTEXT_WINDOW_TOKENS,
+};
 use super::events::ChatEvent;
-use super::failure::{retry_delay_ms, ChatFailure, MAX_RETRIES};
+use super::failure::{retry_delay_ms, ChatFailure};
 use crate::commands::api_url;
 use crate::commands::models::{
     ModelCapability, ModelInfo, ReasoningEffort, ReasoningMode, ReasoningProfile,
@@ -20,6 +25,8 @@ use crate::permission::{needs_approval, Decision, PermissionBroker, PermissionMo
 use crate::tools::{self, ToolCtx};
 
 pub const MAX_ITERATIONS: usize = 50;
+const MODEL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// The fully-resolved execution environment for one agent chat turn.
 pub struct AgentEnv {
@@ -193,6 +200,7 @@ struct StreamOutcome {
 
 /// One streamed chat/completions round: emits text deltas, accumulates tool
 /// calls, returns both.
+#[allow(clippy::too_many_arguments)]
 async fn stream_once(
     http: &reqwest::Client,
     base_url: &str,
@@ -202,6 +210,7 @@ async fn stream_once(
     tools: &[Value],
     reasoning: Option<&ReasoningProfile>,
     reasoning_effort: ReasoningEffort,
+    emit_output_events: bool,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<StreamOutcome, ChatFailure> {
@@ -216,7 +225,10 @@ async fn stream_once(
     }
     apply_reasoning(&mut body, reasoning, reasoning_effort);
 
-    let mut req = http.post(api_url(base_url, "chat/completions")).json(&body);
+    let mut req = http
+        .post(api_url(base_url, "chat/completions"))
+        .timeout(MODEL_REQUEST_TIMEOUT)
+        .json(&body);
     if let Some(key) = api_key {
         req = req.bearer_auth(key);
     }
@@ -242,14 +254,17 @@ async fn stream_once(
     let mut lines = crate::commands::chat::SseLineBuffer::default();
     let mut text = String::new();
     let mut acc = ToolCallAccumulator::default();
+    let mut output_started = false;
 
     'outer: loop {
         let chunk = tokio::select! {
             _ = cancel.cancelled() => return Ok(StreamOutcome { text, tool_calls: vec![], cancelled: true }),
-            c = stream.next() => c,
+            result = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => {
+                result.map_err(|_| ChatFailure::response_timeout(output_started))?
+            },
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk.map_err(|error| ChatFailure::stream(error, !text.is_empty()))?;
+        let chunk = chunk.map_err(|error| ChatFailure::stream(error, output_started))?;
 
         for line in lines.push(&chunk) {
             let Some(data) = crate::commands::chat::sse_data(&line) else {
@@ -267,7 +282,7 @@ async fn stream_once(
                 } else {
                     usage.total_tokens
                 };
-                if total_tokens > 0 {
+                if total_tokens > 0 && emit_output_events {
                     on_event
                         .send(ChatEvent::Usage {
                             prompt_tokens: usage.prompt_tokens,
@@ -284,22 +299,31 @@ async fn stream_once(
                 // the model.
                 if let Some(reasoning) = choice.delta.reasoning_content.or(choice.delta.reasoning) {
                     if !reasoning.is_empty() {
-                        on_event
-                            .send(ChatEvent::Reasoning { content: reasoning })
-                            .map_err(|e| {
-                                ChatFailure::channel(format!("推送消息到界面失败：{e}"))
-                            })?;
+                        output_started = true;
+                        if emit_output_events {
+                            on_event
+                                .send(ChatEvent::Reasoning { content: reasoning })
+                                .map_err(|e| {
+                                    ChatFailure::channel(format!("推送消息到界面失败：{e}"))
+                                })?;
+                        }
                     }
                 }
                 if let Some(content) = choice.delta.content {
                     if !content.is_empty() {
+                        output_started = true;
                         text.push_str(&content);
-                        on_event.send(ChatEvent::Delta { content }).map_err(|e| {
-                            ChatFailure::channel(format!("推送消息到界面失败：{e}"))
-                        })?;
+                        if emit_output_events {
+                            on_event.send(ChatEvent::Delta { content }).map_err(|e| {
+                                ChatFailure::channel(format!("推送消息到界面失败：{e}"))
+                            })?;
+                        }
                     }
                 }
                 if let Some(deltas) = choice.delta.tool_calls {
+                    if !deltas.is_empty() {
+                        output_started = true;
+                    }
                     for d in deltas {
                         acc.push(d);
                     }
@@ -357,6 +381,7 @@ async fn stream_with_retries(
     tools: &[Value],
     reasoning: Option<&ReasoningProfile>,
     reasoning_effort: ReasoningEffort,
+    emit_output_events: bool,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<StreamOutcome, ChatFailure> {
@@ -371,6 +396,7 @@ async fn stream_with_retries(
             tools,
             reasoning,
             reasoning_effort,
+            emit_output_events,
             cancel,
             on_event,
         )
@@ -378,14 +404,17 @@ async fn stream_with_retries(
         {
             Ok(outcome) => return Ok(outcome),
             Err(failure)
-                if failure.retryable && !failure.output_started && retries < MAX_RETRIES =>
+                if failure.retryable
+                    && !failure.output_started
+                    && retries < failure.max_retries() =>
             {
+                let max_retries = failure.max_retries();
                 retries += 1;
                 let delay_ms = retry_delay_ms(retries, failure.retry_after_ms);
                 on_event
                     .send(ChatEvent::Retrying {
                         attempt: retries,
-                        max_retries: MAX_RETRIES,
+                        max_retries,
                         delay_ms,
                         reason: failure.retry_reason().into(),
                     })
@@ -423,8 +452,86 @@ fn permission_description(name: &str, args: &Value) -> String {
             .and_then(Value::as_str)
             .map(|p| format!("编辑文件：{p}"))
             .unwrap_or_else(|| "编辑文件".into()),
+        "device_call" => {
+            let device = args
+                .get("device_id")
+                .and_then(Value::as_str)
+                .unwrap_or("未知设备");
+            let capability = args
+                .get("capability")
+                .and_then(Value::as_str)
+                .unwrap_or("未知能力");
+            format!("在设备 {device} 上调用：{capability}")
+        }
         other => format!("调用工具：{other}"),
     }
+}
+
+fn builtin_tool_is_exposed(allowed_tools: &[String], name: &str) -> bool {
+    allowed_tools.is_empty() || allowed_tools.iter().any(|tool| tool == name)
+}
+
+fn agent_transcript(
+    system_prompt: &str,
+    messages: &[crate::commands::chat::ChatMessage],
+) -> Vec<Value> {
+    let mut transcript = Vec::with_capacity(messages.len() + 1);
+    transcript.push(json!({"role": "system", "content": system_prompt}));
+    transcript.extend(
+        messages
+            .iter()
+            .map(|message| json!({"role": message.role, "content": message.content})),
+    );
+    transcript
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn compact_messages(
+    http: &reqwest::Client,
+    base_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+    messages: &[crate::commands::chat::ChatMessage],
+    automatic: bool,
+    estimated_tokens: u64,
+    context_window: u64,
+    cancel: &CancellationToken,
+    on_event: &Channel<ChatEvent>,
+) -> Result<Option<String>, ChatFailure> {
+    if messages.is_empty() {
+        return Err(ChatFailure::message("当前任务还没有可压缩的对话上下文"));
+    }
+    on_event
+        .send(ChatEvent::ContextCompactionStarted {
+            automatic,
+            estimated_tokens,
+            context_window,
+        })
+        .map_err(|error| ChatFailure::channel(format!("推送上下文压缩状态失败：{error}")))?;
+
+    let transcript = build_compaction_transcript(messages);
+    let outcome = stream_with_retries(
+        http,
+        base_url,
+        api_key,
+        model,
+        &transcript,
+        &[],
+        None,
+        ReasoningEffort::Auto,
+        false,
+        cancel,
+        on_event,
+    )
+    .await?;
+    if outcome.cancelled {
+        return Ok(None);
+    }
+    let summary = truncate_summary(&outcome.text);
+    if summary.is_empty() {
+        return Err(ChatFailure::message("模型没有生成有效的上下文摘要，请重试"));
+    }
+    Ok(Some(summary))
 }
 
 /// The tool-calling agent loop. Returns `Ok(true)` when cancelled by the user.
@@ -442,6 +549,7 @@ pub async fn run_agent_loop(
     reasoning_effort: ReasoningEffort,
     messages: Vec<crate::commands::chat::ChatMessage>,
     env: AgentEnv,
+    context_action: ContextAction,
     cancel: &CancellationToken,
     on_event: &Channel<ChatEvent>,
 ) -> Result<bool, ChatFailure> {
@@ -484,10 +592,102 @@ pub async fn run_agent_loop(
             env.system_prompt
         )
     };
-    let mut transcript: Vec<Value> = Vec::with_capacity(messages.len() + 1);
-    transcript.push(json!({"role": "system", "content": system_prompt}));
-    for m in &messages {
-        transcript.push(json!({"role": m.role, "content": m.content}));
+    let context_window = model_info
+        .and_then(|model| model.context_window)
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS);
+    let compact_at_tokens = compaction_threshold(context_window);
+    let mut active_messages = messages;
+    let mut transcript = agent_transcript(&system_prompt, &active_messages);
+    let estimated_tokens = estimate_payload_tokens(&transcript, &tool_specs);
+
+    if context_action == ContextAction::Inspect {
+        on_event
+            .send(ChatEvent::ContextUsage {
+                estimated_tokens,
+                context_window,
+                compact_at_tokens,
+            })
+            .map_err(|error| ChatFailure::channel(format!("推送上下文使用情况失败：{error}")))?;
+        return Ok(false);
+    }
+
+    if context_action == ContextAction::Compact {
+        let Some(summary) = compact_messages(
+            http,
+            base_url,
+            api_key,
+            model,
+            &active_messages,
+            false,
+            estimated_tokens,
+            context_window,
+            cancel,
+            on_event,
+        )
+        .await?
+        else {
+            return Ok(true);
+        };
+        active_messages = vec![summary_message(&summary)];
+        transcript = agent_transcript(&system_prompt, &active_messages);
+        let estimated_tokens_after = estimate_payload_tokens(&transcript, &tool_specs);
+        on_event
+            .send(ChatEvent::ContextCompacted {
+                automatic: false,
+                summary,
+                estimated_tokens_before: estimated_tokens,
+                estimated_tokens_after,
+                context_window,
+            })
+            .map_err(|error| ChatFailure::channel(format!("推送上下文压缩结果失败：{error}")))?;
+        return Ok(false);
+    }
+
+    if context_action == ContextAction::Chat && should_compact(estimated_tokens, context_window) {
+        let current_message = active_messages
+            .last()
+            .filter(|message| message.role == "user")
+            .cloned()
+            .ok_or_else(|| ChatFailure::message("上下文已接近上限，但找不到当前用户消息"))?;
+        let history = &active_messages[..active_messages.len().saturating_sub(1)];
+        if history.is_empty() {
+            return Err(ChatFailure::message(format!(
+                "本轮输入预计占用 {estimated_tokens} Token，已达到 256K 上下文的 80%，请减少附件或缩短输入"
+            )));
+        }
+        let Some(summary) = compact_messages(
+            http,
+            base_url,
+            api_key,
+            model,
+            history,
+            true,
+            estimated_tokens,
+            context_window,
+            cancel,
+            on_event,
+        )
+        .await?
+        else {
+            return Ok(true);
+        };
+        active_messages = vec![summary_message(&summary), current_message];
+        transcript = agent_transcript(&system_prompt, &active_messages);
+        let estimated_tokens_after = estimate_payload_tokens(&transcript, &tool_specs);
+        if should_compact(estimated_tokens_after, context_window) {
+            return Err(ChatFailure::message(format!(
+                "压缩后上下文仍预计占用 {estimated_tokens_after} Token，请减少本轮附件或缩短输入"
+            )));
+        }
+        on_event
+            .send(ChatEvent::ContextCompacted {
+                automatic: true,
+                summary,
+                estimated_tokens_before: estimated_tokens,
+                estimated_tokens_after,
+                context_window,
+            })
+            .map_err(|error| ChatFailure::channel(format!("推送上下文压缩结果失败：{error}")))?;
     }
 
     let ctx = ToolCtx {
@@ -508,6 +708,7 @@ pub async fn run_agent_loop(
             &tool_specs,
             model_info.and_then(ModelInfo::effective_reasoning),
             reasoning_effort,
+            true,
             cancel,
             on_event,
         )
@@ -541,6 +742,28 @@ pub async fn run_agent_loop(
                     args: args.clone(),
                 })
                 .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
+
+            // Tool specs are a capability hint to the model, not a security
+            // boundary. Reject hallucinated or adversarial builtin calls again
+            // at execution time so Work can never invoke Code-only tools.
+            if mcp::parse_namespaced(&call.name).is_none()
+                && !builtin_tool_is_exposed(&env.allowed_tools, &call.name)
+            {
+                let output = format!("当前模式未提供工具：{}", call.name);
+                on_event
+                    .send(ChatEvent::ToolResult {
+                        id: call.id.clone(),
+                        output: output.clone(),
+                        is_error: true,
+                    })
+                    .map_err(|e| ChatFailure::channel(format!("推送消息到界面失败：{e}")))?;
+                transcript.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": output,
+                }));
+                continue;
+            }
 
             // Permission gate.
             let mut allowed = true;
@@ -696,6 +919,14 @@ mod tests {
         let mut acc = ToolCallAccumulator::default();
         acc.push(delta(Some(0), None, None, Some("junk")));
         assert!(acc.finish().is_empty());
+    }
+
+    #[test]
+    fn execution_rechecks_mode_tool_exposure() {
+        let work_tools = vec!["read_file".to_string(), "fetch".to_string()];
+        assert!(builtin_tool_is_exposed(&work_tools, "read_file"));
+        assert!(!builtin_tool_is_exposed(&work_tools, "bash"));
+        assert!(builtin_tool_is_exposed(&[], "bash"));
     }
 
     fn adjustable_reasoning(transport: ReasoningTransport) -> ReasoningProfile {

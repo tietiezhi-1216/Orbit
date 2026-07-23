@@ -13,6 +13,8 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+pub use crate::agent::context::DEFAULT_CONTEXT_WINDOW_TOKENS;
+
 /// What a model can be used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -23,6 +25,8 @@ pub enum ModelKind {
     Asr,
     /// Text-to-speech.
     Tts,
+    /// Music and sound-effect generation.
+    Audio,
     /// Image generation.
     Image,
     /// Video generation.
@@ -172,12 +176,15 @@ impl ModelInfo {
             output_modalities,
             capabilities: Vec::new(),
             reasoning: None,
-            context_window: None,
+            context_window: Some(DEFAULT_CONTEXT_WINDOW_TOKENS),
             max_output_tokens: None,
             capability_source: default_capability_source(),
             overrides: ModelOverrides::default(),
         };
         model.apply_registry();
+        // Temporary product-wide policy. Provider-specific limits will replace
+        // this once the Gateway catalog exposes trustworthy context metadata.
+        model.context_window = Some(DEFAULT_CONTEXT_WINDOW_TOKENS);
         model
     }
 
@@ -279,6 +286,10 @@ fn default_modalities(kind: ModelKind) -> (Vec<ModelModality>, Vec<ModelModality
         ModelKind::Chat => (vec![ModelModality::Text], vec![ModelModality::Text]),
         ModelKind::Asr => (vec![ModelModality::Audio], vec![ModelModality::Text]),
         ModelKind::Tts => (vec![ModelModality::Text], vec![ModelModality::Audio]),
+        ModelKind::Audio => (
+            vec![ModelModality::Text, ModelModality::Audio],
+            vec![ModelModality::Audio],
+        ),
         ModelKind::Image => (
             vec![ModelModality::Text, ModelModality::Image],
             vec![ModelModality::Image],
@@ -371,6 +382,15 @@ pub fn classify(id: &str) -> ModelKind {
     if has("tts") || lower.contains("text-to-speech") || has("speech") || has("voice") {
         return ModelKind::Tts;
     }
+    if has("music")
+        || has("suno")
+        || has("udio")
+        || has("sfx")
+        || lower.contains("text-to-music")
+        || lower.contains("sound-effect")
+    {
+        return ModelKind::Audio;
+    }
     if has("image")
         || has("img")
         || lower.contains("dall-e")
@@ -462,6 +482,8 @@ mod tests {
         assert_eq!(classify("whisper-1"), ModelKind::Asr);
         assert_eq!(classify("gpt-4o-transcribe"), ModelKind::Asr);
         assert_eq!(classify("mimo-v2.5-tts"), ModelKind::Tts);
+        assert_eq!(classify("suno-music-v4"), ModelKind::Audio);
+        assert_eq!(classify("sound-effect-v2"), ModelKind::Audio);
         assert_eq!(classify("text-embedding-3-large"), ModelKind::Embedding);
         assert_eq!(classify("bge-reranker-v2"), ModelKind::Embedding);
     }
@@ -496,7 +518,14 @@ mod tests {
         assert!(model.input_modalities.contains(&ModelModality::Image));
         assert!(model.has_capability(ModelCapability::ToolCall));
         assert!(model.has_capability(ModelCapability::Reasoning));
+        assert_eq!(model.context_window, Some(DEFAULT_CONTEXT_WINDOW_TOKENS));
         assert_eq!(model.capability_source, "registry");
+    }
+
+    #[test]
+    fn unknown_models_also_default_to_256k_context() {
+        let model = ModelInfo::new("future-chat-model");
+        assert_eq!(model.context_window, Some(DEFAULT_CONTEXT_WINDOW_TOKENS));
     }
 
     #[test]

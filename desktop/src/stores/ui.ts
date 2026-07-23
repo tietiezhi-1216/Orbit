@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ProductMode } from "@/lib/product-mode";
+import type { ProductArea } from "@/lib/product-area";
 
 export type SettingsCategory =
   | "providers"
@@ -9,6 +9,7 @@ export type SettingsCategory =
   | "skills"
   | "mcp"
   | "permissions"
+  | "suggestions"
   | "dictationModel"
   | "dictationHotkey"
   | "dictationPrompt"
@@ -26,8 +27,8 @@ export const clampSidebarWidth = (px: number): number =>
 
 interface UiState {
   /** Active top-level product area. */
-  productMode: ProductMode;
-  setProductMode: (mode: ProductMode) => void;
+  productArea: ProductArea;
+  setProductArea: (area: ProductArea) => void;
   /** Settings dialog visibility + active category. */
   settingsOpen: boolean;
   settingsCategory: SettingsCategory;
@@ -54,8 +55,8 @@ interface UiState {
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
-      productMode: "code",
-      setProductMode: (productMode) => set({ productMode }),
+      productArea: "workspace",
+      setProductArea: (productArea) => set({ productArea }),
       settingsOpen: false,
       settingsCategory: "providers",
       openSettings: (category) =>
@@ -87,12 +88,57 @@ export const useUiStore = create<UiState>()(
     {
       name: "tietiezhi-ui",
       partialize: (state) => ({
-        productMode: state.productMode,
+        productArea: state.productArea,
         sidebarWidth: state.sidebarWidth,
         expandedProjects: state.expandedProjects,
         projectsSectionExpanded: state.projectsSectionExpanded,
         tasksSectionExpanded: state.tasksSectionExpanded,
       }),
+      version: 2,
+      migrate: (persisted) => {
+        const previous =
+          typeof persisted === "object" && persisted != null
+            ? (persisted as Record<string, unknown>)
+            : {};
+        const legacyArea =
+          previous.productMode === "work"
+            ? "tietiezhi"
+            : previous.productMode === "code"
+              ? "workspace"
+              : previous.productMode;
+        const productArea: ProductArea =
+          legacyArea === "tietiezhi" ||
+          legacyArea === "workspace" ||
+          legacyArea === "automations" ||
+          legacyArea === "create"
+            ? legacyArea
+            : "workspace";
+        const expandedProjects =
+          typeof previous.expandedProjects === "object" &&
+          previous.expandedProjects != null
+            ? Object.fromEntries(
+                Object.entries(previous.expandedProjects).filter(
+                  (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+                ),
+              )
+            : {};
+        return {
+          productArea,
+          sidebarWidth:
+            typeof previous.sidebarWidth === "number"
+              ? clampSidebarWidth(previous.sidebarWidth)
+              : SIDEBAR_DEFAULT_PX,
+          expandedProjects,
+          projectsSectionExpanded:
+            typeof previous.projectsSectionExpanded === "boolean"
+              ? previous.projectsSectionExpanded
+              : true,
+          tasksSectionExpanded:
+            typeof previous.tasksSectionExpanded === "boolean"
+              ? previous.tasksSectionExpanded
+              : false,
+        };
+      },
     },
   ),
 );

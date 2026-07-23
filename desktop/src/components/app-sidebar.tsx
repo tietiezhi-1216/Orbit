@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
+  BriefcaseBusiness,
   ChevronRight,
+  Code2,
   Folder,
   FolderOpen,
   MoreHorizontal,
@@ -45,10 +47,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarResizeHandle,
-  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { ProductModeSwitcher } from "@/components/product-mode-switcher";
+import { ProductAreaSwitcher } from "@/components/product-area-switcher";
 import { Separator } from "@/components/ui/separator";
 import {
   dictationHotkey,
@@ -72,6 +73,8 @@ import {
 const revealProjectLabel = navigator.userAgent.includes("Mac")
   ? "在 Finder 中显示"
   : "打开项目文件夹";
+const IS_MACOS = navigator.userAgent.includes("Mac");
+
 export function AppSidebar() {
   const { state: sidebarState } = useSidebar();
   const openSettings = useUiStore((state) => state.openSettings);
@@ -156,12 +159,18 @@ export function AppSidebar() {
       >
         <div
           data-tauri-drag-region
-          className="flex h-12 shrink-0 items-center justify-end border-b px-2"
+          className={cn(
+            "flex h-12 shrink-0 items-center gap-1 border-b px-2",
+            IS_MACOS && "pl-24",
+          )}
         >
-          {sidebarState === "expanded" && <SidebarTrigger />}
+          {sidebarState === "expanded" && (
+            <div className="min-w-0 flex-1">
+              <ProductAreaSwitcher variant="header" />
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-2 p-2">
-          <ProductModeSwitcher />
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -542,6 +551,11 @@ function TaskRow({
             nested && "pl-8",
           )}
         >
+          {task.taskMode === "work" ? (
+            <BriefcaseBusiness className="text-cyan-600/70 dark:text-cyan-300/70" />
+          ) : (
+            <Code2 className="text-violet-600/70 dark:text-violet-300/70" />
+          )}
           {/* Pin the weight so the active row differs only by colour, not by
               font-weight — otherwise the base sidebar's data-active:font-medium
               widens the text and shifts where a long title truncates. */}

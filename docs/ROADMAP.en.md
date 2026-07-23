@@ -22,8 +22,8 @@ Three principles guide that direction:
 | macOS / Windows desktop agent | Shipped and under active development |
 | Go single-binary Hub | Agent, channel, memory, scheduling, and interconnect modules exist; productization is ongoing |
 | Linux / iOS / Android clients | Planned, not shipped |
-| Cross-device desktop/Hub collaboration | The server foundation exists; desktop integration is not complete |
-| Multimodal capability routing | Text and speech recognition are available today; other modalities remain planned |
+| Cross-device desktop/Hub collaboration | Remote Cores, discovery, desktop node registration, and baseline calls are available; mobile and approval coverage are still evolving |
+| Multimodal capability routing | Text, speech recognition, and image/video generation in Create are available today; music, embeddings, and other modalities remain planned |
 
 ## Completed: desktop agent foundation
 
@@ -36,8 +36,10 @@ Three principles guide that direction:
 - [x] Create, import, enable, disable, and load Markdown-based Skills on demand
 - [x] stdio and Streamable HTTP MCP connections
 - [x] Local task persistence, pinning, archiving, and restoring
-- [x] Project management and per-task isolated Git worktrees
+- [x] Work and Code modes with shared context, distinct tool/result surfaces, isolated spaces, and explicit artifact handoff
+- [x] Tietiezhi device center, remote Core management, desktop node registration, discovery, and baseline capability calls
 - [x] Global voice dictation, speech recognition, model polishing, and text insertion
+- [x] Create image/video generation, reference-image input, task progress, and local asset management
 - [x] Light/dark themes, Windows/macOS CI, releases, and in-app updates
 - [x] A multilingual website and Chinese, English, Japanese, and Korean READMEs
 
@@ -54,10 +56,10 @@ Three principles guide that direction:
 
 ## Mid term: connect models, tools, and devices
 
-- [ ] Decide whether `server/` runs locally as a Tauri sidecar or remains a remote Hub connected by the desktop app
-- [ ] Connect the desktop app to `server/internal/interconnect/` for device registration, discovery, and message routing
+- [x] Establish a local-first boundary with an embedded Rust Core and optional remote Cores
+- [x] Connect the desktop app to `server/internal/interconnect/` for device registration, discovery, and message routing
 - [ ] Expose a user-controlled local compatible endpoint to Codex, Claude Code, opencode, and similar developer tools
-- [ ] Create a portable source of truth for cross-client Agent, Skill, and MCP configuration
+- [ ] Continue expanding `shared/interconnect/` and create portable Agent, Skill, and MCP configuration
 - [ ] Surface channels, scheduled tasks, long-term memory, and remote agents in one desktop experience
 
 ## Long term: a composable agent ecosystem
@@ -85,7 +87,7 @@ Three principles guide that direction:
 
 These choices affect the desktop/server boundary and require design work before implementation:
 
-1. Should `server/` run locally as a bundled Tauri sidecar, or remain an independent service used remotely?
+1. How should the existing Go Hub migrate toward an embeddable and standalone Rust Core without breaking protocol compatibility?
 2. How should local and server agents share tasks, memory, tool permissions, and audit history?
 3. How should multimodal files retain clear data boundaries between the device, model providers, and a remote Hub?
 4. Which stable protocols belong in `shared/` so the desktop and server do not become tightly coupled?

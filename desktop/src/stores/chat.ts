@@ -10,6 +10,7 @@ import {
   listConversations,
   loadConversation,
   permissionRespond,
+  refreshProjectRecommendations,
   restoreConversation,
   saveConversation,
   setConversationPinned as setConversationPinnedApi,
@@ -23,6 +24,7 @@ import type {
   StoredMessage,
 } from "@/lib/api";
 import { useProjectStore } from "@/stores/projects";
+import type { TaskMode } from "@/lib/task-mode";
 
 interface ItemBase {
   id: number;
@@ -74,6 +76,15 @@ export type ChatItem =
       status?: number;
       retryable: boolean;
       retries: number;
+    })
+  | (ItemBase & {
+      kind: "context";
+      action: "compaction" | "usage";
+      summary?: string;
+      automatic: boolean;
+      tokensBefore: number;
+      tokensAfter: number;
+      contextWindow: number;
     });
 
 export interface StreamRetryState {
@@ -94,12 +105,15 @@ interface ChatState {
   activeAgentId: string;
   /** Project bound to the current task ("" = standalone task). */
   projectId: string;
+  /** Active writable execution space; transcript and task identity stay shared. */
+  taskMode: TaskMode;
   /** Messages of the current conversation. */
   items: ChatItem[];
   streaming: boolean;
   streamStartedAt: number | null;
   streamModel: string;
   streamRetry: StreamRetryState | null;
+  streamActivity: "compacting" | "inspecting" | null;
   requestId: number | null;
   init: () => Promise<void>;
   newConversation: (projectId?: string) => void;
@@ -117,6 +131,7 @@ interface ChatState {
   ) => Promise<void>;
   setAgent: (agentId: string) => void;
   setProject: (projectId: string) => void;
+  setTaskMode: (mode: TaskMode) => void;
   respondPermission: (requestId: string, decision: PermissionDecision) => void;
   /** Fork into a new conversation holding everything before `itemId`. */
   branchFrom: (itemId: number) => void;
@@ -137,9 +152,43 @@ interface ChatState {
 
 let nextId = 1;
 
+const nextRequestId = (): number => {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return values[0] || 1;
+};
+
+const contextCommand = (
+  text: string,
+): "compact" | "inspect" | null => {
+  switch (text.trim().toLocaleLowerCase()) {
+    case "/compact":
+    case "/summarize":
+    case "/压缩":
+      return "compact";
+    case "/context":
+    case "/上下文":
+      return "inspect";
+    default:
+      return null;
+  }
+};
+
 const toItems = (messages: StoredMessage[]): ChatItem[] =>
   messages.map((m): ChatItem => {
     const base = { id: nextId++, createdAt: m.createdAt };
+    if (m.kind === "context") {
+      return {
+        ...base,
+        kind: "context",
+        action: m.contextAction ?? "usage",
+        summary: m.contextSummary,
+        automatic: m.contextAutomatic ?? false,
+        tokensBefore: m.contextTokensBefore ?? 0,
+        tokensAfter: m.contextTokensAfter ?? m.contextTokensBefore ?? 0,
+        contextWindow: m.contextWindow ?? 256 * 1024,
+      };
+    }
     if (m.kind === "toolCall") {
       return {
         ...base,
@@ -203,6 +252,18 @@ const toItems = (messages: StoredMessage[]): ChatItem[] =>
 /** Drop the UI-only `id`, keeping just what belongs on disk. */
 const toStored = (items: ChatItem[]): StoredMessage[] =>
   items.map((it): StoredMessage => {
+    if (it.kind === "context") {
+      return {
+        kind: "context",
+        createdAt: it.createdAt,
+        contextAction: it.action,
+        contextSummary: it.summary,
+        contextAutomatic: it.automatic,
+        contextTokensBefore: it.tokensBefore,
+        contextTokensAfter: it.tokensAfter,
+        contextWindow: it.contextWindow,
+      };
+    }
     if (it.kind === "toolCall") {
       return {
         kind: "toolCall",
@@ -293,13 +354,32 @@ const toModelContent = (
   ];
 };
 
-/** Model-facing history: clean user/assistant turns, including image parts. */
-const toHistory = (items: ChatItem[]) =>
-  items.flatMap((it) =>
+/** Model-facing history starts at the latest persisted compaction anchor. */
+const toHistory = (items: ChatItem[]) => {
+  let anchorIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "context" && item.action === "compaction" && item.summary) {
+      anchorIndex = index;
+      break;
+    }
+  }
+  const anchor = anchorIndex >= 0 ? items[anchorIndex] : null;
+  const recentItems = anchorIndex >= 0 ? items.slice(anchorIndex + 1) : items;
+  const history = recentItems.flatMap((it) =>
     it.kind === "message" && !it.error && (it.content || it.attachments?.length)
       ? [{ role: it.role, content: toModelContent(it.content, it.attachments) }]
       : [],
   );
+  if (anchor?.kind !== "context" || !anchor.summary) return history;
+  return [
+    {
+      role: "system" as const,
+      content: `<context_summary>\n${anchor.summary}\n</context_summary>\n以上是较早对话的锚定摘要。把它视为可信历史，并结合后续原始消息继续任务。`,
+    },
+    ...history,
+  ];
+};
 
 const DEFAULT_CONVERSATION_TITLE = "新会话";
 
@@ -332,7 +412,7 @@ const pendingTitleIds = new Set<string>();
 export const useChatStore = create<ChatState>()((set, get) => {
   /** Persist a conversation and move it to the top of the sidebar list. */
   const persist = (id: string, title: string, messages: StoredMessage[]) => {
-    const { activeAgentId, projectId } = get();
+    const { activeAgentId, projectId, taskMode } = get();
     return enqueueFileOp(async () => {
       if (inactiveIds.has(id)) return;
       const saved = await saveConversation({
@@ -341,6 +421,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         messages,
         agentId: activeAgentId || undefined,
         projectId: projectId || undefined,
+        taskMode,
       });
       if (inactiveIds.has(id)) return;
       set((state) => ({
@@ -350,6 +431,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             title: saved.title,
             updatedAt: saved.updatedAt,
             projectId,
+            taskMode,
             archivedAt: 0,
             pinnedAt:
               state.conversations.find((conversation) => conversation.id === id)
@@ -402,6 +484,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         streaming: false,
         streamStartedAt: null,
         streamRetry: null,
+        streamActivity: null,
         requestId: null,
       });
     }
@@ -417,17 +500,176 @@ export const useChatStore = create<ChatState>()((set, get) => {
     persist(activeId, title, toStored(items));
   };
 
+  const runContextCommand = async (
+    providerId: string,
+    model: string,
+    action: "compact" | "inspect",
+  ) => {
+    if (get().streaming) return;
+    const requestId = nextRequestId();
+    const startedAt = Date.now();
+    const conversationId = get().activeId;
+    let changed = false;
+
+    const appendContextError = (failure: {
+      message: string;
+      detail: string;
+      code?: string;
+      status?: number;
+      retryable: boolean;
+      retries: number;
+    }) => {
+      changed = true;
+      set((state) => ({
+        items: [
+          ...state.items,
+          {
+            id: nextId++,
+            kind: "error",
+            summary: failure.message.replaceAll("中转站", "模型服务"),
+            detail: failure.detail.replaceAll("中转站", "模型服务"),
+            code: failure.code,
+            status: failure.status,
+            retryable: failure.retryable,
+            retries: failure.retries,
+            createdAt: Date.now(),
+          },
+        ],
+      }));
+    };
+
+    set({
+      streaming: true,
+      streamStartedAt: startedAt,
+      streamModel: model,
+      streamRetry: null,
+      streamActivity: action === "compact" ? "compacting" : "inspecting",
+      requestId,
+    });
+
+    try {
+      await chatStream({
+        requestId,
+        providerId,
+        model,
+        messages: toHistory(get().items),
+        conversationId: conversationId ?? undefined,
+        agentId: get().activeAgentId || undefined,
+        projectId: get().projectId || undefined,
+        taskMode: get().taskMode,
+        contextAction: action,
+        onEvent: (event) => {
+          switch (event.type) {
+            case "started":
+              set({ streamModel: event.model });
+              break;
+            case "retrying":
+              set({
+                streamRetry: {
+                  attempt: event.attempt,
+                  maxRetries: event.maxRetries,
+                  delayMs: event.delayMs,
+                  reason: event.reason,
+                },
+              });
+              break;
+            case "contextCompactionStarted":
+              set({ streamActivity: "compacting", streamRetry: null });
+              break;
+            case "contextCompacted":
+              changed = true;
+              set((state) => ({
+                streamActivity: null,
+                streamRetry: null,
+                items: [
+                  ...state.items,
+                  {
+                    id: nextId++,
+                    kind: "context",
+                    action: "compaction",
+                    summary: event.summary,
+                    automatic: event.automatic,
+                    tokensBefore: event.estimatedTokensBefore,
+                    tokensAfter: event.estimatedTokensAfter,
+                    contextWindow: event.contextWindow,
+                    createdAt: Date.now(),
+                  },
+                ],
+              }));
+              break;
+            case "contextUsage":
+              changed = true;
+              set((state) => ({
+                streamActivity: null,
+                items: [
+                  ...state.items,
+                  {
+                    id: nextId++,
+                    kind: "context",
+                    action: "usage",
+                    automatic: false,
+                    tokensBefore: event.estimatedTokens,
+                    tokensAfter: event.estimatedTokens,
+                    contextWindow: event.contextWindow,
+                    createdAt: Date.now(),
+                  },
+                ],
+              }));
+              break;
+            case "error":
+              set({ streamActivity: null, streamRetry: null });
+              appendContextError({ ...event, retryable: false });
+              break;
+            case "done":
+            case "delta":
+            case "reasoning":
+            case "usage":
+            case "toolCallStart":
+            case "toolResult":
+            case "permissionRequest":
+              break;
+          }
+        },
+      });
+    } catch (error) {
+      appendContextError({
+        message: "上下文操作失败",
+        detail: errorMessage(error),
+        retryable: false,
+        retries: 0,
+      });
+    } finally {
+      if (get().requestId !== requestId) return;
+      set({
+        streaming: false,
+        streamStartedAt: null,
+        streamRetry: null,
+        streamActivity: null,
+        requestId: null,
+      });
+      const activeId = get().activeId;
+      if (changed && activeId != null && activeId === conversationId) {
+        const title =
+          get().conversations.find((conversation) => conversation.id === activeId)?.title ??
+          DEFAULT_CONVERSATION_TITLE;
+        persist(activeId, title, toStored(get().items));
+      }
+    }
+  };
+
   return {
     conversations: [],
     activeId: null,
     draftVersion: 0,
     activeAgentId: "",
     projectId: "",
+    taskMode: "code",
     items: [],
     streaming: false,
     streamStartedAt: null,
     streamModel: "",
     streamRetry: null,
+    streamActivity: null,
     requestId: null,
 
     async init() {
@@ -449,6 +691,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         projectId,
         streamStartedAt: null,
         streamRetry: null,
+        streamActivity: null,
       }));
     },
 
@@ -462,8 +705,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
           items: toItems(conv.messages),
           activeAgentId: conv.agentId ?? "",
           projectId: conv.projectId ?? "",
+          taskMode: conv.taskMode ?? "code",
           streamStartedAt: null,
           streamRetry: null,
+          streamActivity: null,
         });
         if (conv.projectId) void useProjectStore.getState().markUsed(conv.projectId);
       } catch (err) {
@@ -545,6 +790,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
       persistCurrent();
     },
 
+    setTaskMode(taskMode) {
+      if (get().streaming || get().taskMode === taskMode) return;
+      set({ taskMode });
+      persistCurrent();
+    },
+
     respondPermission(requestId, decision) {
       void permissionRespond(requestId, decision).catch((err: unknown) => {
         console.error("回复授权失败：", errorMessage(err));
@@ -560,7 +811,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     async send(providerId, model, text, attachments = []) {
       if (get().streaming) return;
-      const requestId = nextId++;
+      const action = attachments.length === 0 ? contextCommand(text) : null;
+      if (action) {
+        await runContextCommand(providerId, model, action);
+        return;
+      }
+      const requestId = nextRequestId();
+      const taskMode = get().taskMode;
+      const suggestionProjectId = get().projectId;
 
       // Resolve the target conversation, creating one on first message.
       let convId = get().activeId;
@@ -592,6 +850,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         streamStartedAt: now,
         streamModel: model,
         streamRetry: null,
+        streamActivity: null,
         requestId,
       });
 
@@ -705,6 +964,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           conversationId: convId,
           agentId: get().activeAgentId || undefined,
           projectId: get().projectId || undefined,
+          taskMode,
           onEvent: (event) => {
             switch (event.type) {
               case "started": {
@@ -719,6 +979,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
               }
               case "reasoning": {
                 if (get().streamRetry != null) set({ streamRetry: null });
+                if (get().streamActivity != null) set({ streamActivity: null });
                 firstTokenAt ??= Date.now();
                 ensureTextItem();
                 reasoningText += event.content;
@@ -727,6 +988,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
               }
               case "delta": {
                 if (get().streamRetry != null) set({ streamRetry: null });
+                if (get().streamActivity != null) set({ streamActivity: null });
                 sawText = true;
                 if (titleAssistantText.length < 4_000) {
                   titleAssistantText += event.content;
@@ -746,7 +1008,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                 break;
               }
               case "toolCallStart": {
-                set({ streamRetry: null });
+                set({ streamRetry: null, streamActivity: null });
                 cancelFlush();
                 flushReply();
                 textItemId = null;
@@ -804,13 +1066,49 @@ export const useChatStore = create<ChatState>()((set, get) => {
                 });
                 break;
               }
+              case "contextCompactionStarted": {
+                set({ streamActivity: "compacting", streamRetry: null });
+                break;
+              }
+              case "contextCompacted": {
+                set((state) => {
+                  const currentUserIndex = state.items.findIndex(
+                    (item) => item.id === userItem.id,
+                  );
+                  if (currentUserIndex < 0) return { streamActivity: null };
+                  const contextItem: ChatItem = {
+                    id: nextId++,
+                    kind: "context",
+                    action: "compaction",
+                    summary: event.summary,
+                    automatic: event.automatic,
+                    tokensBefore: event.estimatedTokensBefore,
+                    tokensAfter: event.estimatedTokensAfter,
+                    contextWindow: event.contextWindow,
+                    createdAt: Date.now(),
+                  };
+                  return {
+                    streamActivity: null,
+                    streamRetry: null,
+                    items: [
+                      ...state.items.slice(0, currentUserIndex),
+                      contextItem,
+                      ...state.items.slice(currentUserIndex),
+                    ],
+                  };
+                });
+                break;
+              }
+              case "contextUsage": {
+                break;
+              }
               case "done": {
-                set({ streamRetry: null });
+                set({ streamRetry: null, streamActivity: null });
                 cancelled = event.cancelled;
                 break;
               }
               case "error": {
-                set({ streamRetry: null });
+                set({ streamRetry: null, streamActivity: null });
                 cancelFlush();
                 fail(event);
                 break;
@@ -869,6 +1167,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
             streaming: false,
             streamStartedAt: null,
             streamRetry: null,
+            streamActivity: null,
             requestId: null,
           });
           const saved = persist(convId, title, toStored(get().items));
@@ -881,6 +1180,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
               titleAssistantText,
               saved,
             );
+          }
+          if (!failed && !cancelled) {
+            void saved.then(() => {
+              window.setTimeout(() => {
+                if (get().streaming) return;
+                void refreshProjectRecommendations(
+                  suggestionProjectId,
+                  taskMode,
+                ).catch((error: unknown) => {
+                  console.warn("后台更新任务建议失败：", errorMessage(error));
+                });
+              }, 30_000);
+            });
           }
         }
       }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use super::workspace::TaskMode;
 use crate::agent::loop_::AgentEnv;
 use crate::agent::prompt;
 use crate::permission::PermissionMode;
@@ -103,15 +104,18 @@ pub(crate) fn resolve_env(
     agent_id: Option<&str>,
     project_id: Option<&str>,
     conversation_id: Option<&str>,
+    task_mode: TaskMode,
 ) -> Result<AgentEnv, String> {
     let settings = super::settings::read_settings(app)?;
     let agent = agent_id.and_then(|id| find_agent(app, id));
-    let allowed_tools = agent
+    let configured_tools = agent
         .as_ref()
         .map(|agent| agent.tools.clone())
         .unwrap_or_default();
+    let allowed_tools = task_mode.filter_builtin_tools(&configured_tools);
 
-    let workspace = super::workspace::resolve_task_workspace(app, project_id, conversation_id)?;
+    let workspace =
+        super::workspace::resolve_task_workspace(app, project_id, conversation_id, task_mode)?;
 
     // Skills visible to this turn: all enabled ones, optionally narrowed by
     // the agent's selection.
@@ -160,6 +164,7 @@ pub(crate) fn resolve_env(
             .unwrap_or(""),
         &workspace.to_string_lossy(),
         &skill_list,
+        task_mode,
     );
 
     let permission_mode = PermissionMode::parse(

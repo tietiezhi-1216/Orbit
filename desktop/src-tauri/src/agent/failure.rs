@@ -103,6 +103,20 @@ impl ChatFailure {
         }
     }
 
+    pub fn response_timeout(output_started: bool) -> Self {
+        Self {
+            summary: "模型服务响应超时".into(),
+            detail: "模型服务长时间没有返回新数据，请重试或先使用 /compact 压缩上下文".into(),
+            code: Some("stream_idle_timeout".into()),
+            status: None,
+            retryable: !output_started,
+            retries: 0,
+            output_started,
+            retry_after_ms: None,
+            retry_reason: "长时间没有返回新数据".into(),
+        }
+    }
+
     pub fn http(status: StatusCode, body: String, retry_after_ms: Option<u64>) -> Self {
         let status_code = status.as_u16();
         let parsed = serde_json::from_str::<Value>(&body).ok();
@@ -153,6 +167,14 @@ impl ChatFailure {
 
     pub fn retry_reason(&self) -> &str {
         &self.retry_reason
+    }
+
+    pub fn max_retries(&self) -> u8 {
+        match self.code.as_deref() {
+            Some("request_timeout" | "stream_timeout") => 0,
+            Some("stream_idle_timeout") => 1,
+            _ => MAX_RETRIES,
+        }
     }
 
     pub fn with_retries(mut self, retries: u8) -> Self {
@@ -213,5 +235,16 @@ mod tests {
         assert_eq!(retry_delay_ms(1, None), 800);
         assert_eq!(retry_delay_ms(5, None), 8_000);
         assert_eq!(retry_delay_ms(2, Some(12_000)), 12_000);
+    }
+
+    #[test]
+    fn timeouts_retry_only_once_and_never_repeat_partial_output() {
+        let failure = ChatFailure::response_timeout(false);
+        assert!(failure.retryable);
+        assert_eq!(failure.max_retries(), 1);
+
+        let partial = ChatFailure::response_timeout(true);
+        assert!(!partial.retryable);
+        assert_eq!(partial.max_retries(), 1);
     }
 }

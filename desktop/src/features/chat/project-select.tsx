@@ -60,7 +60,7 @@ export function ProjectSelect() {
           size="sm"
           disabled={locked}
           title={locked ? "任务开始后不能更换项目" : "选择项目"}
-          className="text-muted-foreground hover:text-foreground h-7 max-w-56 justify-start gap-1.5 rounded-lg px-2 text-xs font-normal"
+          className="text-muted-foreground hover:text-foreground h-7 max-w-56 justify-start gap-1.5 rounded-lg px-2 text-xs font-normal focus-visible:border-transparent focus-visible:ring-0 focus-visible:shadow-[0_5px_16px_rgba(52,129,140,0.17)] data-[state=open]:shadow-[0_5px_16px_rgba(52,129,140,0.17)] dark:focus-visible:shadow-[0_5px_18px_rgba(75,164,176,0.15)] dark:data-[state=open]:shadow-[0_5px_18px_rgba(75,164,176,0.15)]"
         >
           <Folder className="size-3.5" />
           <span className="truncate">{selected?.name ?? "选择项目"}</span>

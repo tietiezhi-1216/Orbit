@@ -286,6 +286,7 @@ pub(crate) async fn fetch_models(
         #[serde(default)]
         architecture: Option<ModelArchitecture>,
         #[serde(default)]
+        #[allow(dead_code)]
         context_length: Option<u64>,
         #[serde(default)]
         max_output_tokens: Option<u64>,
@@ -379,7 +380,9 @@ pub(crate) async fn fetch_models(
                 });
             }
 
-            model.context_window = entry.context_length.or(model.context_window);
+            // Keep every model on the temporary 256K product-wide context
+            // policy until Gateway model metadata becomes the source of truth.
+            model.context_window = Some(super::models::DEFAULT_CONTEXT_WINDOW_TOKENS);
             model.max_output_tokens = entry
                 .max_output_tokens
                 .or_else(|| entry.top_provider.and_then(|p| p.max_completion_tokens))

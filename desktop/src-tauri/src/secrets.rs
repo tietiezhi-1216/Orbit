@@ -18,6 +18,10 @@ fn provider_account(provider_id: &str) -> String {
     format!("provider-{provider_id}")
 }
 
+fn device_core_account(core_id: &str) -> String {
+    format!("device-core-{core_id}")
+}
+
 // MARK: - Public API (backend-agnostic)
 
 pub fn set_provider_key(provider_id: &str, value: &str) -> Result<(), String> {
@@ -30,6 +34,18 @@ pub fn get_provider_key(provider_id: &str) -> Result<Option<String>, String> {
 
 pub fn delete_provider_key(provider_id: &str) -> Result<(), String> {
     backend::delete(&provider_account(provider_id))
+}
+
+pub fn set_device_core_token(core_id: &str, value: &str) -> Result<(), String> {
+    backend::set(&device_core_account(core_id), value)
+}
+
+pub fn get_device_core_token(core_id: &str) -> Result<Option<String>, String> {
+    backend::get(&device_core_account(core_id))
+}
+
+pub fn delete_device_core_token(core_id: &str) -> Result<(), String> {
+    backend::delete(&device_core_account(core_id))
 }
 
 /// Legacy single-relay key (read-only, migration only).

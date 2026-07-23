@@ -28,14 +28,14 @@ Tietiezhi is an open-source AI project built around **device × model interconne
 
 Different models excel at different jobs: reasoning, coding, speech, images, video, or low-latency execution. Tietiezhi aims to route the right model, tools, and context to each device and task, so every model can do what it does best instead of asking one model to do everything.
 
-The product available today is a desktop agent for **macOS 13.3+** and **Windows 10/11 (x64)**. The Go server provides the foundation for a Hub and device interconnection. Linux, iOS, Android, and complete cross-device collaboration remain roadmap items and are not shipped clients yet.
+The product available today is a desktop agent for **macOS 13.3+** and **Windows 10/11 (x64)**. The desktop app can add remote Cores, discover online devices, and invoke baseline capabilities through one device protocol. Linux, iOS, Android, and full sensitive-capability approval remain roadmap items.
 
 ## One network for devices and models
 
 | Layer | Foundation today | Direction |
 | --- | --- | --- |
 | Devices | macOS and Windows desktop app | Linux, iOS, Android, standalone binaries, and edge nodes |
-| Hub | Go single-binary server with device registration and message-routing foundations | Device discovery, state sync, and task handoff through a local sidecar or remote Hub |
+| Hub | Go single-binary service plus desktop remote-Core management, registration, discovery, and baseline calls | Rust Core, mobile nodes, state sync, and task handoff |
 | Models | Multiple OpenAI-compatible services, text chat, and speech recognition | Capability routing across reasoning, code, speech, image, video, music, and embedding models |
 | Agents | Local tools, permissions, Skills, MCP, and isolated workspaces | Cross-device collaboration, delegation, automation, and unified execution history |
 
@@ -49,8 +49,11 @@ Every desktop app, mobile device, server process, or lightweight node should be 
 | Local agents | Streaming conversations, multi-step tool use, custom system prompts, and reusable agent profiles |
 | Tools and permissions | File, editing, search, shell, and fetch tools with Ask, Auto, and Full Access permission modes |
 | Skills and MCP | Import Markdown-based Skills and connect stdio or Streamable HTTP MCP servers |
-| Projects and tasks | Local task history and workspaces, pinning, archiving, and isolated Git worktrees for repositories |
+| Projects and workspaces | One task shares context across Work for research/deliverables and Code for terminal/test workflows; isolated spaces support explicit file handoff |
+| Context management | Uses a 256K window and persists an anchored summary at about 80%; `/compact` compacts early and `/context` shows estimated usage |
+| Device interconnection | Manage local and remote Cores in Tietiezhi, discover online devices, and invoke approved capabilities through `device_call` |
 | Voice dictation | Global shortcut, speech recognition, model-powered polishing, and text insertion into the active app |
+| Visual creation | Create focuses on image and video generation with reference images, task progress, retries, and local asset management |
 | Local-first security | API keys live in macOS Keychain or Windows Credential Manager; no ads, tracking, or telemetry |
 | Native desktop experience | Light and dark themes, in-app updates, and native installers for macOS and Windows |
 
@@ -65,8 +68,9 @@ Every desktop app, mobile device, server process, or lightweight node should be 
 
 1. Download the installer for your platform from the [website](https://tietiezhi-1216.github.io/tietiezhi/) or [GitHub Releases](https://github.com/tietiezhi-1216/tietiezhi/releases/latest).
 2. Open **Settings → Providers**. Use Tietiezhi Gateway or add your own OpenAI-compatible `baseURL` and API key.
-3. Sync and select a model, then create a task. Select a local project directory when the task needs repository access.
-4. Add agent profiles, Skills, MCP servers, and tool permissions as needed.
+3. Add a remote Core in **Tietiezhi**, select a target device, and inspect its exposed capabilities.
+4. Sync and select a model, then create a task in **Workspace**. Select a local project directory when needed and switch between Work and Code for the current goal.
+5. Add agent profiles, Skills, MCP servers, and tool permissions as needed.
 
 > Tietiezhi never bundles your private API key. Charges and data-processing terms for third-party models are determined by their providers.
 
@@ -89,7 +93,7 @@ Near-term priorities include:
 - full desktop localization, plus more reliable installation, signing, updates, and cross-platform behavior;
 - a polished end-to-end experience for providers, agent tools, approvals, Skills, and MCP;
 - usage and cost insights, and stronger task, project, and workspace management;
-- a clear local-sidecar versus remote-server architecture for `server/`, followed by Linux, mobile, and edge-node connections.
+- expansion of the connected desktop remote-Core/device protocol to Linux, mobile, and edge nodes, alongside the Rust Core evolution.
 
 Longer-term directions include multi-agent collaboration, integrations with Codex / Claude Code / opencode, multimodal models, visual workflows, and automation. See the [full roadmap](./docs/ROADMAP.en.md) for status and boundaries.
 
@@ -100,7 +104,7 @@ Longer-term directions include multi-agent collaboration, integrations with Code
 | [`desktop/`](./desktop) | Main desktop app: Tauri 2 + Rust + React 19 + TypeScript + shadcn/ui |
 | [`server/`](./server) | Go agent hub: OpenAI-compatible API, channels, memory, scheduling, and an interconnect foundation |
 | [`website/`](./website) | Multilingual website and download page published with GitHub Pages |
-| [`shared/`](./shared) | Reserved source of truth for cross-client protocols and configuration |
+| [`shared/`](./shared) | Source of truth for cross-client protocols and configuration, including device capability calls |
 | [`assets/brand/`](./assets/brand) | Logo, mascot, and application icon sources |
 | [`docs/`](./docs) | Roadmap, privacy policy, and code-signing documents |
 

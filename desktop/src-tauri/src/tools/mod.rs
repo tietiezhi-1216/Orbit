@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod device;
 pub mod fetch;
 pub mod fs_tools;
 pub mod search;
@@ -53,6 +54,7 @@ pub const ALL_TOOLS: &[&str] = &[
     "bash",
     "fetch",
     "skill",
+    "device_call",
 ];
 
 /// Read-only tools are auto-allowed in the "auto" permission mode.
@@ -164,6 +166,17 @@ pub fn specs(allowed: &[String], available_skills: &[String]) -> Vec<Value> {
             },"required":["name"]}),
         ));
     }
+    if want("device_call") {
+        out.push(spec(
+            "device_call",
+            "让铁铁汁在指定设备或 Core 上调用一个已授权能力。先使用界面中的设备中心确认 device_id 和能力；所有设备操作都会经过权限确认。",
+            json!({"type":"object","properties":{
+                "device_id":{"type":"string","description":"设备中心显示的设备 ID，例如 local、core:<id> 或 <core-id>/<device-id>"},
+                "capability":{"type":"string","description":"能力标识，例如 system.status、system.ping、app.focus"},
+                "input":{"type":"object","description":"传给设备能力的参数；没有参数时传空对象"}
+            },"required":["device_id","capability"]}),
+        ));
+    }
     out
 }
 
@@ -180,6 +193,7 @@ pub async fn run(name: &str, args: &Value, ctx: &ToolCtx) -> Result<String, Stri
         "bash" => bash::bash_tool(ctx, args).await?,
         "fetch" => fetch::fetch_tool(ctx, args).await?,
         "skill" => skill::skill_tool(ctx, args)?,
+        "device_call" => device::device_call(ctx, args).await?,
         other => return Err(format!("未知工具：{other}")),
     };
     Ok(truncate_output(&out))

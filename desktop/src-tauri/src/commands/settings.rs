@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use super::models::{deserialize_models, known_kind_override, ModelInfo, ModelKind};
+use super::models::{
+    deserialize_models, known_kind_override, ModelInfo, ModelKind, DEFAULT_CONTEXT_WINDOW_TOKENS,
+};
 use crate::secrets;
 
-const CURRENT_SETTINGS_VERSION: u32 = 4;
+const CURRENT_SETTINGS_VERSION: u32 = 6;
 pub(crate) const BUILTIN_PROVIDER_ID: &str = "builtin-official";
 pub(crate) const BUILTIN_PROVIDER_NAME: &str = "Tietiezhi Gateway";
 pub(crate) const BUILTIN_PROVIDER_URL: &str = "https://api.terln.com/v1";
@@ -80,6 +82,11 @@ pub struct AppSettings {
     /// Show the model's reasoning / chain-of-thought (collapsed) above replies.
     /// Off by default; only reasoning models that stream it are affected.
     pub show_reasoning: bool,
+    /// Show cached, context-aware task suggestions in the workspace empty state.
+    pub smart_suggestions_enabled: bool,
+    /// Allow suggestion refreshes to use a user-configured non-built-in provider.
+    /// Off by default because these background requests may incur charges.
+    pub smart_suggestions_allow_paid_models: bool,
 
     // --- Legacy fields (pre multi-provider); read only for migration. ---
     #[serde(skip_serializing)]
@@ -131,6 +138,19 @@ pub(crate) fn read_settings(app: &AppHandle) -> Result<AppSettings, String> {
         changed = true;
     }
     if settings.settings_version < 4 && refresh_registry_capability_profiles(&mut settings) {
+        changed = true;
+    }
+    if settings.settings_version < 5 {
+        settings.smart_suggestions_enabled = true;
+        settings.smart_suggestions_allow_paid_models = false;
+        changed = true;
+    }
+    if settings.settings_version < 6 {
+        for provider in &mut settings.providers {
+            for model in &mut provider.models {
+                model.context_window = Some(DEFAULT_CONTEXT_WINDOW_TOKENS);
+            }
+        }
         changed = true;
     }
     if normalize_known_model_capabilities(&mut settings) {
@@ -212,6 +232,8 @@ fn initial_settings() -> AppSettings {
         output_language: "auto".into(),
         permission_mode: "auto".into(),
         chat_reasoning_effort: "auto".into(),
+        smart_suggestions_enabled: true,
+        smart_suggestions_allow_paid_models: false,
         ..Default::default()
     }
 }
@@ -397,6 +419,8 @@ mod tests {
         assert!(settings.providers[0].built_in);
         assert_eq!(settings.providers[0].id, BUILTIN_PROVIDER_ID);
         assert!(settings.chat_provider_id.is_empty());
+        assert!(settings.smart_suggestions_enabled);
+        assert!(!settings.smart_suggestions_allow_paid_models);
         assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
     }
 

@@ -1,7 +1,7 @@
 {
   "name": "tietiezhi-desktop",
   "private": true,
-  "version": "2026.7.20-231534",
+  "version": "2026.7.23-230833",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
@@ -26,6 +26,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "@xyflow/react": "^12.11.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

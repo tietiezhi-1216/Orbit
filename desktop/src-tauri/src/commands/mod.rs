@@ -1,8 +1,11 @@
 pub mod agents;
 pub mod assets;
+pub mod automations;
 pub mod capsule;
 pub mod chat;
 pub mod conversations;
+pub mod create;
+pub mod devices;
 pub mod dictation;
 pub mod hotkey;
 pub mod mcp;

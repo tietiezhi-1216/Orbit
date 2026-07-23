@@ -4,6 +4,7 @@ import {
   Archive,
   Info,
   Keyboard,
+  Lightbulb,
   Mic,
   MessageSquareQuote,
   Monitor,
@@ -36,6 +37,7 @@ import { PermissionSection } from "@/features/settings/permission-section";
 import { ProviderManager } from "@/features/settings/provider-manager";
 import { SkillsSection } from "@/features/settings/skills-section";
 import { SystemPromptSection } from "@/features/settings/system-prompt-section";
+import { SuggestionsSection } from "@/features/settings/suggestions-section";
 import { TitleModelSection } from "@/features/settings/title-model-section";
 import { SettingsSection } from "@/features/settings/settings-section";
 import { UpdateCard } from "@/features/settings/update-card";
@@ -69,6 +71,7 @@ const GROUPS: CategoryGroup[] = [
       { key: "skills", label: "技能", icon: Sparkles },
       { key: "mcp", label: "MCP 服务器", icon: Plug },
       { key: "permissions", label: "权限", icon: ShieldCheck },
+      { key: "suggestions", label: "任务建议", icon: Lightbulb },
     ],
   },
   {
@@ -148,6 +151,7 @@ export function SettingsDialog() {
             {category === "skills" && <SkillsSection />}
             {category === "mcp" && <McpSection />}
             {category === "permissions" && <PermissionSection />}
+            {category === "suggestions" && <SuggestionsSection />}
             {category === "dictationModel" && <DictationModelSection />}
             {category === "dictationHotkey" && <DictationHotkeySection />}
             {category === "dictationPrompt" && <DictationPromptSection />}

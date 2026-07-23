@@ -52,6 +52,23 @@ pub enum ChatEvent {
         delay_ms: u64,
         reason: String,
     },
+    ContextCompactionStarted {
+        automatic: bool,
+        estimated_tokens: u64,
+        context_window: u64,
+    },
+    ContextCompacted {
+        automatic: bool,
+        summary: String,
+        estimated_tokens_before: u64,
+        estimated_tokens_after: u64,
+        context_window: u64,
+    },
+    ContextUsage {
+        estimated_tokens: u64,
+        context_window: u64,
+        compact_at_tokens: u64,
+    },
     Done {
         cancelled: bool,
     },
@@ -125,5 +142,16 @@ mod tests {
                 "reason":"服务暂时不可用（503）"
             })
         );
+
+        let v = serde_json::to_value(ChatEvent::ContextCompacted {
+            automatic: true,
+            summary: "summary".into(),
+            estimated_tokens_before: 210_000,
+            estimated_tokens_after: 4_000,
+            context_window: 262_144,
+        })
+        .unwrap();
+        assert_eq!(v["type"], "contextCompacted");
+        assert_eq!(v["estimatedTokensBefore"], 210_000);
     }
 }

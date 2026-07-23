@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import type { TaskMode } from "@/lib/task-mode";
 
 export type ProviderType = "openai" | "mimo";
 
@@ -11,6 +12,7 @@ export type ModelKind =
   | "chat"
   | "asr"
   | "tts"
+  | "audio"
   | "image"
   | "video"
   | "embedding"
@@ -125,6 +127,154 @@ export interface Project {
   lastOpenedAt: number;
 }
 
+export interface ProjectSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  category: "explore" | "quality" | "test" | "docs";
+}
+
+export interface ProjectRecommendations {
+  projectId: string;
+  taskMode: TaskMode;
+  generatedAt: number;
+  model: string;
+  tokenUsage: number;
+  technologies: string[];
+  suggestions: ProjectSuggestion[];
+}
+
+export interface DeviceCore {
+  id: string;
+  name: string;
+  baseUrl: string;
+  createdAt: number;
+  online: boolean;
+  latencyMs?: number;
+  deviceCount: number;
+  lastError: string;
+  hasToken: boolean;
+}
+
+export type TietiezhiDeviceRole = "core" | "device";
+
+export interface TietiezhiDevice {
+  /** Stable target id accepted by invokeDevice/device_call. */
+  id: string;
+  /** Device id inside its owning Core. */
+  nativeId: string;
+  name: string;
+  platform: string;
+  coreId: string;
+  coreName: string;
+  role: TietiezhiDeviceRole;
+  online: boolean;
+  capabilities: string[];
+}
+
+export interface DeviceInvokeResult {
+  requestId: string;
+  deviceId: string;
+  capability: string;
+  ok: boolean;
+  output: unknown;
+  message: string;
+  durationMs: number;
+}
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type AutomationNodeType =
+  | "manualTrigger"
+  | "scheduleTrigger"
+  | "model"
+  | "agent"
+  | "skill"
+  | "mcpTool"
+  | "builtinTool"
+  | "code"
+  | "condition"
+  | "merge"
+  | "approval"
+  | "output"
+  | `custom.${string}`;
+
+export type AutomationValueBinding =
+  | { kind: "literal"; value: JsonValue }
+  | { kind: "triggerInput"; path: string }
+  | { kind: "nodeOutput"; nodeId: string; path: string }
+  | { kind: "secretRef"; credentialId: string; key?: string };
+
+export interface AutomationPosition {
+  x: number;
+  y: number;
+}
+
+export interface AutomationNode {
+  id: string;
+  type: AutomationNodeType;
+  typeVersion: number;
+  name: string;
+  position: AutomationPosition;
+  disabled: boolean;
+  config: Record<string, JsonValue>;
+  inputs: Record<string, AutomationValueBinding>;
+}
+
+export interface AutomationEdge {
+  id: string;
+  sourceNodeId: string;
+  sourcePort: string;
+  targetNodeId: string;
+  targetPort: string;
+}
+
+export interface AutomationSettings {
+  timezone: string;
+  maxDurationMs: number;
+  maxConcurrency: number;
+  onMissedSchedule: "skip" | "runLatest";
+}
+
+export interface AutomationDocument {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  description: string;
+  revision: number;
+  nodes: AutomationNode[];
+  edges: AutomationEdge[];
+  settings: AutomationSettings;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationMeta {
+  id: string;
+  name: string;
+  description: string;
+  revision: number;
+  nodeCount: number;
+  triggerType: string;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt: number;
+}
+
+export interface AutomationValidationIssue {
+  code: string;
+  message: string;
+  nodeId?: string;
+  edgeId?: string;
+}
+
 export interface Skill {
   name: string;
   description: string;
@@ -163,6 +313,10 @@ export interface AppSettings {
   showMessageStats: boolean;
   /** Show the model's reasoning / chain-of-thought (collapsed) above replies. */
   showReasoning: boolean;
+  /** Show cached AI-generated starters in the workspace empty state. */
+  smartSuggestionsEnabled: boolean;
+  /** Permit background suggestions to use a user-paid provider. */
+  smartSuggestionsAllowPaidModels: boolean;
 }
 
 export type ChatRole = "system" | "user" | "assistant";
@@ -192,7 +346,7 @@ export interface ChatMessage {
 
 /** One persisted transcript entry; legacy files omit `kind` (= "message"). */
 export interface StoredMessage {
-  kind?: "message" | "toolCall" | "permission" | "error";
+  kind?: "message" | "toolCall" | "permission" | "error" | "context";
   role?: ChatRole;
   content?: string;
   /** Reasoning / chain-of-thought, shown collapsed above the answer. */
@@ -221,6 +375,12 @@ export interface StoredMessage {
   errorStatus?: number;
   errorRetryable?: boolean;
   errorRetries?: number;
+  contextAction?: "compaction" | "usage";
+  contextSummary?: string;
+  contextAutomatic?: boolean;
+  contextTokensBefore?: number;
+  contextTokensAfter?: number;
+  contextWindow?: number;
 }
 
 export interface Conversation {
@@ -232,6 +392,8 @@ export interface Conversation {
   agentId?: string;
   /** Optional project binding; empty = standalone task. */
   projectId?: string;
+  /** Last execution space selected inside this shared task. */
+  taskMode?: TaskMode;
   /** 0/undefined for active tasks; otherwise archive time in milliseconds. */
   archivedAt?: number;
   /** 0/undefined for normal tasks; otherwise pin time in milliseconds. */
@@ -243,8 +405,45 @@ export interface ConversationMeta {
   title: string;
   updatedAt: number;
   projectId: string;
+  taskMode: TaskMode;
   archivedAt: number;
   pinnedAt: number;
+}
+
+export interface WorkspaceFileEntry {
+  path: string;
+  size: number;
+  modifiedAt: number;
+}
+
+export interface TaskWorkspaceModeStatus {
+  mode: TaskMode;
+  initialized: boolean;
+  rootPath: string;
+  isGit: boolean;
+  fileCount: number;
+  fileCountCapped: boolean;
+  changedFiles: string[];
+  deliverables: WorkspaceFileEntry[];
+  transferableFiles: WorkspaceFileEntry[];
+}
+
+export interface TaskWorkspaceOverview {
+  work: TaskWorkspaceModeStatus;
+  code: TaskWorkspaceModeStatus;
+}
+
+export function taskWorkspaceOverview(taskId: string): Promise<TaskWorkspaceOverview> {
+  return invoke<TaskWorkspaceOverview>("task_workspace_overview", { taskId });
+}
+
+export function transferTaskWorkspaceFile(args: {
+  taskId: string;
+  fromMode: TaskMode;
+  toMode: TaskMode;
+  path: string;
+}): Promise<string> {
+  return invoke<string>("transfer_task_workspace_file", args);
 }
 
 export interface SaveConversationResult {
@@ -280,6 +479,26 @@ export type ChatEvent =
       maxRetries: number;
       delayMs: number;
       reason: string;
+    }
+  | {
+      type: "contextCompactionStarted";
+      automatic: boolean;
+      estimatedTokens: number;
+      contextWindow: number;
+    }
+  | {
+      type: "contextCompacted";
+      automatic: boolean;
+      summary: string;
+      estimatedTokensBefore: number;
+      estimatedTokensAfter: number;
+      contextWindow: number;
+    }
+  | {
+      type: "contextUsage";
+      estimatedTokens: number;
+      contextWindow: number;
+      compactAtTokens: number;
     }
   | { type: "done"; cancelled: boolean }
   | {
@@ -337,6 +556,97 @@ export function fetchProviderModels(args: FetchModelsArgs): Promise<ModelInfo[]>
   });
 }
 
+// MARK: - Create
+
+export interface CreateImageGenerationRequest {
+  providerId: string;
+  model: string;
+  prompt: string;
+  aspectRatio: "1:1" | "4:3" | "3:4" | "16:9" | "9:16" | "21:9";
+  quality: "standard" | "high";
+  resultCount: number;
+  referencePaths: string[];
+}
+
+export interface CreateImageGenerationResult {
+  providerId: string;
+  model: string;
+  filePath: string;
+  mimeType: string;
+  revisedPrompt?: string;
+  /** Dev mock only; production results are always read from filePath. */
+  previewDataUrl?: string;
+}
+
+export function generateCreateImage(
+  request: CreateImageGenerationRequest,
+): Promise<CreateImageGenerationResult[]> {
+  return invoke<CreateImageGenerationResult[]>("generate_create_image", { request });
+}
+
+export interface CreateVideoGenerationRequest {
+  requestId: number;
+  providerId: string;
+  model: string;
+  prompt: string;
+  aspectRatio: "1:1" | "4:3" | "3:4" | "16:9" | "9:16" | "21:9";
+  quality: "standard" | "high";
+  durationSeconds: number;
+  referencePath?: string;
+  onEvent: (event: CreateVideoGenerationEvent) => void;
+}
+
+export interface CreateVideoGenerationResult {
+  providerId: string;
+  model: string;
+  filePath: string;
+  mimeType: string;
+  durationSeconds: number;
+}
+
+export type CreateVideoGenerationEvent =
+  | { type: "started"; providerId: string; model: string }
+  | { type: "progress"; progress: number; status: string }
+  | { type: "completed"; result: CreateVideoGenerationResult }
+  | { type: "cancelled" }
+  | { type: "error"; message: string };
+
+export function generateCreateVideo(
+  request: CreateVideoGenerationRequest,
+): Promise<void> {
+  const channel = new Channel<CreateVideoGenerationEvent>();
+  channel.onmessage = request.onEvent;
+  return invoke("generate_create_video", {
+    requestId: request.requestId,
+    request: {
+      providerId: request.providerId,
+      model: request.model,
+      prompt: request.prompt,
+      aspectRatio: request.aspectRatio,
+      quality: request.quality,
+      durationSeconds: request.durationSeconds,
+      referencePath: request.referencePath ?? null,
+    },
+    onEvent: channel,
+  });
+}
+
+export function cancelCreateGeneration(requestId: number): Promise<void> {
+  return invoke("cancel_create_generation", { requestId });
+}
+
+export function exportCreateAsset(filePath: string): Promise<string | null> {
+  return invoke<string | null>("export_create_asset", { filePath });
+}
+
+export function deleteCreateAssetFile(filePath: string): Promise<void> {
+  return invoke("delete_create_asset", { filePath });
+}
+
+export function readCreateAssetDataUrl(filePath: string): Promise<string> {
+  return invoke<string>("read_create_asset_data_url", { filePath });
+}
+
 // MARK: - Chat
 
 export interface ChatStreamArgs {
@@ -347,6 +657,8 @@ export interface ChatStreamArgs {
   conversationId?: string;
   agentId?: string;
   projectId?: string;
+  taskMode: TaskMode;
+  contextAction?: "compact" | "inspect";
   onEvent: (event: ChatEvent) => void;
 }
 
@@ -361,6 +673,28 @@ export function chatStream(args: ChatStreamArgs): Promise<void> {
     conversationId: args.conversationId ?? null,
     agentId: args.agentId ?? null,
     projectId: args.projectId ?? null,
+    taskMode: args.taskMode,
+    contextAction: args.contextAction ?? null,
+    onEvent: channel,
+  });
+}
+
+export interface TietiezhiStreamArgs {
+  requestId: number;
+  deviceId: string;
+  deviceName: string;
+  messages: ChatMessage[];
+  onEvent: (event: ChatEvent) => void;
+}
+
+export function tietiezhiStream(args: TietiezhiStreamArgs): Promise<void> {
+  const channel = new Channel<ChatEvent>();
+  channel.onmessage = args.onEvent;
+  return invoke("tietiezhi_stream", {
+    requestId: args.requestId,
+    deviceId: args.deviceId,
+    deviceName: args.deviceName,
+    messages: args.messages,
     onEvent: channel,
   });
 }
@@ -450,6 +784,49 @@ export function mcpStopServer(id: string): Promise<void> {
   return invoke("mcp_stop_server", { id });
 }
 
+// MARK: - Automations
+
+export function listAutomations(includeArchived = false): Promise<AutomationMeta[]> {
+  return invoke<AutomationMeta[]>("list_automations", { includeArchived });
+}
+
+export function loadAutomation(id: string): Promise<AutomationDocument> {
+  return invoke<AutomationDocument>("load_automation", { id });
+}
+
+export function createAutomation(name?: string): Promise<AutomationDocument> {
+  return invoke<AutomationDocument>("create_automation", {
+    name: name?.trim() || null,
+  });
+}
+
+export function saveAutomation(
+  automation: AutomationDocument,
+): Promise<AutomationDocument> {
+  return invoke<AutomationDocument>("save_automation", { automation });
+}
+
+export function validateAutomation(
+  automation: AutomationDocument,
+  publish = false,
+): Promise<AutomationValidationIssue[]> {
+  return invoke<AutomationValidationIssue[]>("validate_automation", {
+    automation,
+    publish,
+  });
+}
+
+export function archiveAutomation(
+  id: string,
+  archived = true,
+): Promise<AutomationMeta> {
+  return invoke<AutomationMeta>("archive_automation", { id, archived });
+}
+
+export function deleteAutomation(id: string): Promise<void> {
+  return invoke("delete_automation", { id });
+}
+
 // MARK: - Workspace / system prompt
 
 /** Folder picker; resolves null when dismissed. */
@@ -477,6 +854,82 @@ export function renameProject(id: string, name: string): Promise<Project> {
 
 export function revealProject(id: string): Promise<void> {
   return invoke("reveal_project", { id });
+}
+
+export function projectRecommendations(
+  projectId: string,
+  taskMode: TaskMode,
+): Promise<ProjectRecommendations | null> {
+  return invoke<ProjectRecommendations | null>("project_recommendations", {
+    projectId: projectId || null,
+    taskMode,
+  });
+}
+
+export function refreshProjectRecommendations(
+  projectId: string,
+  taskMode: TaskMode,
+  force = false,
+): Promise<ProjectRecommendations | null> {
+  return invoke<ProjectRecommendations | null>("refresh_project_recommendations", {
+    projectId: projectId || null,
+    taskMode,
+    force,
+  });
+}
+
+export function markProjectSuggestionUsed(
+  projectId: string,
+  taskMode: TaskMode,
+  suggestionId: string,
+): Promise<void> {
+  return invoke("mark_project_suggestion_used", {
+    projectId: projectId || null,
+    taskMode,
+    suggestionId,
+  });
+}
+
+// MARK: - Tietiezhi devices
+
+export function listDeviceCores(): Promise<DeviceCore[]> {
+  return invoke<DeviceCore[]>("list_device_cores");
+}
+
+export function addDeviceCore(args: {
+  name: string;
+  baseUrl: string;
+  accessToken?: string;
+}): Promise<DeviceCore> {
+  return invoke<DeviceCore>("add_device_core", {
+    name: args.name,
+    baseUrl: args.baseUrl,
+    accessToken: args.accessToken?.trim() || null,
+  });
+}
+
+export function removeDeviceCore(id: string): Promise<void> {
+  return invoke("remove_device_core", { id });
+}
+
+export function probeDeviceCore(id: string): Promise<DeviceCore> {
+  return invoke<DeviceCore>("probe_device_core", { id });
+}
+
+export function listConnectedDevices(): Promise<TietiezhiDevice[]> {
+  return invoke<TietiezhiDevice[]>("list_connected_devices");
+}
+
+export function invokeDevice(args: {
+  deviceId: string;
+  capability: string;
+  input?: Record<string, unknown>;
+}): Promise<DeviceInvokeResult> {
+  return invoke<DeviceInvokeResult>("invoke_device", {
+    deviceId: args.deviceId,
+    capability: args.capability,
+    input: args.input ?? {},
+  });
 }
 
 /** The built-in chat system prompt (settings editor's reset target). */

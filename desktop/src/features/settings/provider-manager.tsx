@@ -83,6 +83,7 @@ const KIND_LABELS: Record<ModelKind, string> = {
   chat: "对话",
   asr: "语音识别",
   tts: "语音合成",
+  audio: "音乐与声音",
   image: "图像",
   video: "视频",
   embedding: "向量",

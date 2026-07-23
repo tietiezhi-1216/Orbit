@@ -35,7 +35,12 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { saveSettings } from "@/lib/api";
 import type { AppSettings, ModelInfo, ReasoningEffort } from "@/lib/api";
 import {
@@ -357,7 +362,7 @@ export function ModelSelect({
   const label = selectedEffort ? `${modelText} · ${selectedEffort}` : modelText;
 
   return (
-    <Popover
+    <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
@@ -367,7 +372,7 @@ export function ModelSelect({
         }
       }}
     >
-      <PopoverTrigger asChild>
+      <DialogTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
@@ -375,14 +380,14 @@ export function ModelSelect({
           title={
             lockedSelection
               ? "当前智能体已固定模型，请在智能体设置中修改"
-              : selectedModel?.id
+              : label
           }
           aria-label={prominent ? promptText ?? "选择聊天模型" : undefined}
           className={cn(
-            "text-muted-foreground hover:text-foreground min-w-0 gap-1",
+            "text-muted-foreground hover:text-foreground min-w-0 gap-1 focus-visible:border-transparent focus-visible:ring-0 focus-visible:shadow-[0_5px_16px_rgba(52,129,140,0.17)] data-[state=open]:shadow-[0_5px_16px_rgba(52,129,140,0.17)] dark:focus-visible:shadow-[0_5px_18px_rgba(75,164,176,0.15)] dark:data-[state=open]:shadow-[0_5px_18px_rgba(75,164,176,0.15)]",
             prominent
-              ? "group text-foreground h-auto max-w-[min(36rem,calc(100vw-2rem))] gap-0 bg-transparent px-0 py-1 text-lg font-semibold tracking-tight hover:!bg-transparent focus-visible:ring-0 data-[state=open]:!bg-transparent"
-              : "h-7 px-2 text-xs",
+              ? "group text-foreground h-auto max-w-[min(36rem,calc(100vw-2rem))] gap-0 bg-transparent px-0 py-1 text-lg font-semibold tracking-tight hover:!bg-transparent data-[state=open]:!bg-transparent"
+              : "h-7 shrink-0 px-2 text-xs",
           )}
         >
           {prominent ? (
@@ -397,17 +402,21 @@ export function ModelSelect({
             </span>
           ) : (
             <>
-              <span className="whitespace-nowrap">{label}</span>
+              <span className="whitespace-nowrap">{modelText}</span>
+              {selectedEffort && (
+                <>
+                  <span aria-hidden className="shrink-0">·</span>
+                  <span className="shrink-0 tabular-nums">{selectedEffort}</span>
+                </>
+              )}
               <ChevronDown className="size-3 shrink-0" />
             </>
           )}
         </Button>
-      </PopoverTrigger>
-      <PopoverContent
+      </DialogTrigger>
+      <DialogContent
         aria-label="选择聊天模型"
-        align={prominent ? "center" : "end"}
-        side={prominent ? "top" : "bottom"}
-        sideOffset={prominent ? 12 : 6}
+        showCloseButton={false}
         onInteractOutside={(event) => {
           // The effort hover submenu portals outside this popover. Keep the panel
           // open while it's used; selecting an effort closes it explicitly.
@@ -415,12 +424,13 @@ export function ModelSelect({
           if (target?.closest("[data-slot='hover-card-content']")) event.preventDefault();
         }}
         className={cn(
-          "gap-0 overflow-hidden p-0",
+          "block max-h-[min(36rem,calc(100vh-4rem))] gap-0 overflow-hidden p-0",
           hasMultipleProviders
-            ? "w-[min(34rem,calc(100vw-2rem))]"
-            : "w-[min(24rem,calc(100vw-2rem))]",
+            ? "w-[min(34rem,calc(100vw-2rem))] sm:max-w-[34rem]"
+            : "w-[min(24rem,calc(100vw-2rem))] sm:max-w-[24rem]",
         )}
       >
+        <DialogTitle className="sr-only">选择聊天模型</DialogTitle>
         <div className="flex min-h-0">
           {hasMultipleProviders && (
             <aside className="border-border/60 flex w-36 shrink-0 flex-col border-r p-2">
@@ -505,6 +515,16 @@ export function ModelSelect({
                         ? configuredEffort
                         : "auto"
                       : null;
+                    const reasoning = modelReasoning(model);
+                    const visibleEffort = modelHasCapability(model, "reasoning")
+                      ? active && effortOverride
+                        ? EFFORT_LABELS[effortOverride]
+                        : reasoning?.mode === "fixed"
+                          ? "Fixed"
+                          : EFFORT_LABELS[
+                              markedEffort ?? reasoning?.defaultEffort ?? "auto"
+                            ]
+                      : null;
                     const item = (
                       <CommandItem
                         key={`${group.providerId}:${model.id}`}
@@ -541,6 +561,11 @@ export function ModelSelect({
                           )}
                         </span>
                         <span className="text-muted-foreground group-data-[checked=true]/command-item:text-cyan-600 dark:group-data-[checked=true]/command-item:text-cyan-300 flex shrink-0 items-center gap-1.5">
+                          {visibleEffort && (
+                            <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-[10px] leading-none tabular-nums group-data-[checked=true]/command-item:bg-cyan-500/10">
+                              {visibleEffort}
+                            </span>
+                          )}
                           {modelInputModalities(model).includes("image") && (
                             <ImageIcon aria-label="支持图片输入" className="size-3.5" />
                           )}
@@ -623,7 +648,7 @@ export function ModelSelect({
             </CommandList>
           </Command>
         </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -7,7 +7,196 @@
 //! Never reaches a release build: the entry points import it behind
 //! `import.meta.env.DEV`, so the dynamic import is dead code in production.
 
-import type { ChatAttachment, ModelInfo, Provider } from "@/lib/api";
+import type {
+  AutomationDocument,
+  AutomationMeta,
+  AutomationValidationIssue,
+  ChatAttachment,
+  DeviceCore,
+  ModelInfo,
+  Provider,
+  TietiezhiDevice,
+} from "@/lib/api";
+
+const createMockAutomation = (): AutomationDocument => {
+  const timestamp = Date.now() - 420_000;
+  return {
+    schemaVersion: 1,
+    id: crypto.randomUUID(),
+    name: "每日需求分拣",
+    description: "汇总新需求，交给 Agent 分类后输出处理建议。",
+    revision: 0,
+    nodes: [
+      {
+        id: "trigger",
+        type: "scheduleTrigger",
+        typeVersion: 1,
+        name: "工作日 9:00",
+        position: { x: 80, y: 180 },
+        disabled: false,
+        config: { cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" },
+        inputs: {},
+      },
+      {
+        id: "agent",
+        type: "agent",
+        typeVersion: 1,
+        name: "需求分类 Agent",
+        position: { x: 390, y: 180 },
+        disabled: false,
+        config: { agentId: "agent-coder", prompt: "分类并给出处理优先级" },
+        inputs: { input: { kind: "nodeOutput", nodeId: "trigger", path: "/" } },
+      },
+      {
+        id: "output",
+        type: "output",
+        typeVersion: 1,
+        name: "输出处理建议",
+        position: { x: 700, y: 180 },
+        disabled: false,
+        config: {},
+        inputs: { input: { kind: "nodeOutput", nodeId: "agent", path: "/" } },
+      },
+    ],
+    edges: [
+      {
+        id: "edge-trigger-agent",
+        sourceNodeId: "trigger",
+        sourcePort: "output",
+        targetNodeId: "agent",
+        targetPort: "input",
+      },
+      {
+        id: "edge-agent-output",
+        sourceNodeId: "agent",
+        sourcePort: "output",
+        targetNodeId: "output",
+        targetPort: "input",
+      },
+    ],
+    settings: {
+      timezone: "Asia/Shanghai",
+      maxDurationMs: 300_000,
+      maxConcurrency: 4,
+      onMissedSchedule: "skip",
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+const automationMeta = (
+  automation: AutomationDocument,
+  archivedAt = 0,
+): AutomationMeta => ({
+  id: automation.id,
+  name: automation.name,
+  description: automation.description,
+  revision: automation.revision,
+  nodeCount: automation.nodes.length,
+  triggerType:
+    automation.nodes.find(
+      (node) => node.type === "manualTrigger" || node.type === "scheduleTrigger",
+    )?.type ?? "",
+  createdAt: automation.createdAt,
+  updatedAt: automation.updatedAt,
+  archivedAt,
+});
+
+const validateMockAutomation = (
+  automation: AutomationDocument,
+  publish: boolean,
+): AutomationValidationIssue[] => {
+  const issues: AutomationValidationIssue[] = [];
+  const nodeIds = new Set<string>();
+  for (const node of automation.nodes) {
+    if (!node.id || nodeIds.has(node.id)) {
+      issues.push({
+        code: "duplicate_node_id",
+        message: "节点 ID 不能为空且不能重复",
+        nodeId: node.id,
+      });
+    }
+    nodeIds.add(node.id);
+  }
+  for (const node of automation.nodes) {
+    for (const binding of Object.values(node.inputs)) {
+      if (binding.kind !== "nodeOutput") continue;
+      if (binding.nodeId === node.id) {
+        issues.push({
+          code: "self_binding",
+          message: "节点输入不能引用自身输出",
+          nodeId: node.id,
+        });
+      } else if (!nodeIds.has(binding.nodeId)) {
+        issues.push({
+          code: "missing_binding_node",
+          message: "节点输入引用了不存在的上游节点",
+          nodeId: node.id,
+        });
+      }
+    }
+  }
+  const indegree = new Map([...nodeIds].map((id) => [id, 0]));
+  const outgoing = new Map<string, string[]>();
+  for (const edge of automation.edges) {
+    if (!nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId)) {
+      issues.push({
+        code: "dangling_edge",
+        message: "连线引用了不存在的节点",
+        edgeId: edge.id,
+      });
+    }
+    if (edge.sourceNodeId === edge.targetNodeId) {
+      issues.push({
+        code: "self_edge",
+        message: "节点不能连接到自身",
+        edgeId: edge.id,
+      });
+    }
+    if (nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)) {
+      indegree.set(edge.targetNodeId, (indegree.get(edge.targetNodeId) ?? 0) + 1);
+      outgoing.set(edge.sourceNodeId, [
+        ...(outgoing.get(edge.sourceNodeId) ?? []),
+        edge.targetNodeId,
+      ]);
+    }
+  }
+  const ready = [...indegree]
+    .filter(([, degree]) => degree === 0)
+    .map(([id]) => id);
+  let visited = 0;
+  while (ready.length > 0) {
+    const id = ready.pop();
+    if (!id) continue;
+    visited += 1;
+    for (const target of outgoing.get(id) ?? []) {
+      const degree = (indegree.get(target) ?? 1) - 1;
+      indegree.set(target, degree);
+      if (degree === 0) ready.push(target);
+    }
+  }
+  if (visited !== nodeIds.size) {
+    issues.push({ code: "cycle", message: "工作流不能包含任意图环" });
+  }
+  if (publish) {
+    const triggerCount = automation.nodes.filter(
+      (node) =>
+        !node.disabled &&
+        (node.type === "manualTrigger" || node.type === "scheduleTrigger"),
+    ).length;
+    if (triggerCount !== 1) {
+      issues.push({
+        code: "trigger_count",
+        message: "发布版本必须且只能包含一个启用的触发器",
+      });
+    }
+    if (!automation.nodes.some((node) => !node.disabled && node.type === "output")) {
+      issues.push({ code: "missing_output", message: "发布版本至少需要一个输出节点" });
+    }
+  }
+  return issues;
+};
 
 const capableChatModel = (id: string): ModelInfo => ({
   id,
@@ -22,12 +211,15 @@ const capableChatModel = (id: string): ModelInfo => ({
     transport: "openai-reasoning-effort",
   },
   capabilitySource: "registry",
+  contextWindow: 256 * 1024,
 });
 
-const TERLN_MODELS: ModelInfo[] = [
+const TERLN_MODELS: ModelInfo[] = ([
   { id: "agnes-1.5-flash", kind: "chat" },
   { id: "agnes-2.0-flash", kind: "chat" },
   { id: "agnes-image-2.1-flash", kind: "image" },
+  { id: "agnes-music-v1", kind: "audio" },
+  { id: "agnes-sound-v1", kind: "audio" },
   { id: "agnes-video-v2.0", kind: "video" },
   { id: "claude-opus-4-6-thinking", kind: "chat" },
   { id: "claude-sonnet-4-6", kind: "chat" },
@@ -58,13 +250,13 @@ const TERLN_MODELS: ModelInfo[] = [
   { id: "gpt-image-2", kind: "image" },
   { id: "gpt-oss-120b-medium", kind: "chat" },
   { id: "sensenova-u1-fast", kind: "image" },
-];
+] satisfies ModelInfo[]).map((model) => ({ ...model, contextWindow: 256 * 1024 }));
 
-const MIMO_MODELS: ModelInfo[] = [
+const MIMO_MODELS: ModelInfo[] = ([
   { id: "mimo-v2.5-pro", kind: "chat" },
   { id: "mimo-v2.5-asr", kind: "asr" },
   { id: "mimo-v2.5-tts", kind: "tts" },
-];
+] satisfies ModelInfo[]).map((model) => ({ ...model, contextWindow: 256 * 1024 }));
 
 const DEFAULT_PROMPT = `# 角色
 你是语音输入整理器。先理解用户意图，再贴着原句做语法整理与轻度润色。
@@ -82,6 +274,19 @@ interface MockChannel {
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
+function escapeXml(value: string): string {
+  return value.replace(/[<>&"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "<": "&lt;",
+      ">": "&gt;",
+      "&": "&amp;",
+      '"': "&quot;",
+      "'": "&apos;",
+    };
+    return entities[character] ?? character;
+  });
+}
+
 /** Install the stub on `window.__TAURI_INTERNALS__`. Idempotent. */
 export function installTauriMock(): void {
   const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
@@ -91,10 +296,11 @@ export function installTauriMock(): void {
   const setupState = new URLSearchParams(window.location.search).get("setup");
   let nextCallbackId = 1;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const exampleAutomation = createMockAutomation();
 
   const state = {
     settings: {
-      settingsVersion: 4,
+      settingsVersion: 5,
       providers: [
         {
           id: "builtin-official",
@@ -121,6 +327,10 @@ export function installTauriMock(): void {
       systemPrompt: "",
       permissionMode: "auto",
       skillsDisabled: [] as string[],
+      showMessageStats: false,
+      showReasoning: false,
+      smartSuggestionsEnabled: true,
+      smartSuggestionsAllowPaidModels: false,
       mcpServers: [
         {
           id: "mcp-fs",
@@ -172,7 +382,73 @@ export function installTauriMock(): void {
         lastOpenedAt: Date.now() - 3_600_000,
       },
     ] as Record<string, unknown>[],
+    deviceCores: [
+      {
+        id: "core-home",
+        name: "家里的 Core",
+        baseUrl: "http://192.168.1.20:8080",
+        createdAt: Date.now() - 86_400_000,
+        online: true,
+        latencyMs: 18,
+        deviceCount: 2,
+        lastError: "",
+        hasToken: true,
+      },
+    ] as DeviceCore[],
+    devices: [
+      {
+        id: "local",
+        nativeId: "local",
+        name: "Tietiezhi MacBook",
+        platform: "macos",
+        coreId: "local",
+        coreName: "软件内嵌 Core",
+        role: "device",
+        online: true,
+        capabilities: [
+          "system.status",
+          "system.ping",
+          "app.focus",
+          "files.access",
+          "terminal.execute",
+          "browser.control",
+        ],
+      },
+      {
+        id: "core:core-home",
+        nativeId: "core-home",
+        name: "家里的 Core",
+        platform: "core",
+        coreId: "core-home",
+        coreName: "家里的 Core",
+        role: "core",
+        online: true,
+        capabilities: ["core.health", "core.devices"],
+      },
+      {
+        id: "core-home/android-phone",
+        nativeId: "android-phone",
+        name: "Pixel 10 Pro",
+        platform: "android",
+        coreId: "core-home",
+        coreName: "家里的 Core",
+        role: "device",
+        online: true,
+        capabilities: [
+          "system.status",
+          "system.ping",
+          "notification.send",
+          "camera.capture",
+          "location.read",
+        ],
+      },
+    ] as TietiezhiDevice[],
     conversations: new Map<string, Record<string, unknown>>(),
+    automations: new Map<string, AutomationDocument>([
+      [exampleAutomation.id, exampleAutomation],
+    ]),
+    automationArchivedAt: new Map<string, number>(),
+    suggestionDecks: new Map<string, Record<string, unknown>>(),
     cancelled: new Set<number>(),
   };
 
@@ -215,11 +491,50 @@ export function installTauriMock(): void {
     state.cancelled.delete(requestId);
   };
 
+  const streamCreateVideo = async (
+    requestId: number,
+    channel: MockChannel,
+    request: {
+      providerId?: string;
+      model?: string;
+      durationSeconds?: number;
+    },
+  ) => {
+    let index = 0;
+    const emit = (message: Record<string, unknown>) =>
+      push(channel, index++, { message });
+    const providerId = request.providerId || "builtin-official";
+    const model = request.model || "agnes-video-v2.0";
+    emit({ type: "started", providerId, model });
+    for (const progress of [8, 18, 34, 52, 71, 88, 96]) {
+      if (state.cancelled.has(requestId)) {
+        emit({ type: "cancelled" });
+        push(channel, index, { end: true });
+        state.cancelled.delete(requestId);
+        return;
+      }
+      emit({ type: "progress", progress, status: "processing" });
+      await sleep(180);
+    }
+    emit({
+      type: "completed",
+      result: {
+        providerId,
+        model,
+        filePath: "",
+        mimeType: "video/mp4",
+        durationSeconds: Number(request.durationSeconds) || 5,
+      },
+    });
+    push(channel, index, { end: true });
+  };
+
   /** Scripted agent turn: text → tool call → permission ask → result → text. */
   const streamAgentDemo = async (
     requestId: number,
     channel: MockChannel,
     model = "mock-model",
+    taskMode: "work" | "code" = "code",
   ) => {
     let i = 0;
     const emit = (message: Record<string, unknown>) => push(channel, i++, { message });
@@ -231,6 +546,36 @@ export function installTauriMock(): void {
     emit({ type: "toolCallStart", id: "call_1", name: "read_file", args: { path: "README.md" } });
     await sleep(600);
     emit({ type: "toolResult", id: "call_1", output: "    1\t# 铁铁汁\n    2\t演示内容", isError: false });
+    if (taskMode === "work") {
+      emit({
+        type: "toolCallStart",
+        id: "call_2",
+        name: "write_file",
+        args: { path: "成果摘要.md", content: "# 成果摘要" },
+      });
+      await sleep(400);
+      emit({
+        type: "toolResult",
+        id: "call_2",
+        output: "已写入成果摘要.md",
+        isError: false,
+      });
+      for (const ch of "已完成资料整理，成果文件：`成果摘要.md`。") {
+        emit({ type: "delta", content: ch });
+        await sleep(20);
+      }
+      emit({
+        type: "usage",
+        promptTokens: 84,
+        completionTokens: 26,
+        totalTokens: 110,
+        cachedTokens: 20,
+      });
+      emit({ type: "done", cancelled: state.cancelled.has(requestId) });
+      push(channel, i, { end: true });
+      state.cancelled.delete(requestId);
+      return;
+    }
     emit({
       type: "permissionRequest",
       id: "perm_1",
@@ -300,6 +645,84 @@ export function installTauriMock(): void {
   let pendingPermission: string | null = null;
 
   const handlers: Record<string, Handler> = {
+    // --- Automation ---
+    list_automations: (a) =>
+      [...state.automations.values()]
+        .map((automation) =>
+          automationMeta(
+            automation,
+            state.automationArchivedAt.get(automation.id) ?? 0,
+          ),
+        )
+        .filter((meta) => Boolean(a.includeArchived) || meta.archivedAt === 0)
+        .sort((left, right) => right.updatedAt - left.updatedAt),
+    load_automation: (a) => {
+      const automation = state.automations.get(a.id as string);
+      if (!automation) throw "Automation 不存在或已被删除";
+      return structuredClone(automation);
+    },
+    create_automation: (a) => {
+      const timestamp = Date.now();
+      const automation: AutomationDocument = {
+        schemaVersion: 1,
+        id: crypto.randomUUID(),
+        name: String(a.name ?? "").trim() || "未命名自动化",
+        description: "",
+        revision: 0,
+        nodes: [
+          {
+            id: crypto.randomUUID(),
+            type: "manualTrigger",
+            typeVersion: 1,
+            name: "手动触发",
+            position: { x: 96, y: 180 },
+            disabled: false,
+            config: {},
+            inputs: {},
+          },
+        ],
+        edges: [],
+        settings: {
+          timezone: "Asia/Shanghai",
+          maxDurationMs: 300_000,
+          maxConcurrency: 4,
+          onMissedSchedule: "skip",
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.automations.set(automation.id, automation);
+      return structuredClone(automation);
+    },
+    save_automation: (a) => {
+      const automation = structuredClone(a.automation as AutomationDocument);
+      if (!state.automations.has(automation.id)) {
+        throw "Automation 不存在或已被删除";
+      }
+      const issues = validateMockAutomation(automation, false);
+      if (issues[0]) throw issues[0].message;
+      automation.name = automation.name.trim() || "未命名自动化";
+      automation.updatedAt = Date.now();
+      state.automations.set(automation.id, automation);
+      return structuredClone(automation);
+    },
+    validate_automation: (a) =>
+      validateMockAutomation(
+        a.automation as AutomationDocument,
+        Boolean(a.publish),
+      ),
+    archive_automation: (a) => {
+      const automation = state.automations.get(a.id as string);
+      if (!automation) throw "Automation 不存在或已被删除";
+      const archivedAt = a.archived ? Date.now() : 0;
+      state.automationArchivedAt.set(automation.id, archivedAt);
+      return automationMeta(automation, archivedAt);
+    },
+    delete_automation: (a) => {
+      state.automationArchivedAt.delete(a.id as string);
+      state.automations.delete(a.id as string);
+    },
+
     // --- Agents / skills / MCP / workspace ---
     list_agents: () => structuredClone(state.agents),
     upsert_agent: (a) => {
@@ -321,6 +744,7 @@ export function installTauriMock(): void {
       "bash",
       "fetch",
       "skill",
+      "device_call",
     ],
     list_skills: () =>
       [...state.skills.entries()].map(([name, s]) => ({
@@ -429,10 +853,178 @@ export function installTauriMock(): void {
       return structuredClone(project);
     },
     reveal_project: () => {},
+    project_recommendations: (a) =>
+      structuredClone(
+        state.suggestionDecks.get(`${String(a.projectId ?? "standalone")}:${String(a.taskMode)}`) ?? null,
+      ),
+    refresh_project_recommendations: async (a) => {
+      if (!state.settings.smartSuggestionsEnabled) return null;
+      const key = `${String(a.projectId ?? "standalone")}:${String(a.taskMode)}`;
+      const existing = state.suggestionDecks.get(key);
+      if (existing && !a.force) return structuredClone(existing);
+      await sleep(900);
+      const project = state.projects.find((item) => item.id === a.projectId);
+      const name = project ? String(project.name) : "最近工作";
+      const code = a.taskMode !== "work";
+      const technologies = project?.name === "Tietiezhi"
+        ? ["Rust", "TypeScript", "React", "Tauri"]
+        : project
+          ? ["TypeScript", "Node.js"]
+          : [];
+      const deck = {
+        projectId: String(a.projectId ?? ""),
+        taskMode: code ? "code" : "work",
+        generatedAt: Date.now(),
+        model: "mock-suggestion-model",
+        tokenUsage: 428,
+        technologies,
+        suggestions: code
+          ? [
+              {
+                id: crypto.randomUUID(),
+                title: project ? `梳理 ${name} 架构` : "回顾近期工作",
+                description: project
+                  ? `识别 ${technologies.join("、")} 的模块边界与开发路径。`
+                  : "从近期任务中识别值得继续推进的方向。",
+                prompt: `分析 ${name} 的技术栈、架构和关键模块，说明主要数据流与模块职责，输出结构化概览，并通过现有文档和代码交叉验证结论。`,
+                category: "explore",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "审查本地改动",
+                description: "检查正确性、回归风险以及缺失的验证。",
+                prompt: `审查 ${name} 当前的本地代码改动，定位正确性问题和回归风险，直接修复明确问题，并运行最相关的检查与测试验证结果。`,
+                category: "quality",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "运行项目检查",
+                description: "执行类型检查、Rust 测试和前端构建。",
+                prompt: `识别并运行 ${name} 适用的类型检查、静态检查和测试，修复本次发现的问题，最后汇总执行命令、结果和剩余风险。`,
+                category: "test",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "检查 CI 一致性",
+                description: "对比自动化流程与本地开发命令。",
+                prompt: `检查 ${name} 的 CI、TODO 和模块边界，对比本地命令与自动化流程，选择一个影响明确的问题完成修复并验证。`,
+                category: "docs",
+              },
+            ]
+          : [
+              {
+                id: crypto.randomUUID(),
+                title: `生成 ${name} 概览`,
+                description: "整理定位、架构、模块职责和关键流程。",
+                prompt: `研究并整理 ${name} 的定位、架构、模块职责和关键流程，形成结构化项目概览，标明依据、未知项和建议的后续行动。`,
+                category: "explore",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "核对文档与实现",
+                description: "检查说明是否准确覆盖当前能力。",
+                prompt: `检查 ${name} 的现有文档与实际实现是否一致，列出缺失、过时和容易误解的内容，并生成可直接采用的修订稿。`,
+                category: "docs",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "梳理交付流程",
+                description: "解读检查、构建、测试和发布链路。",
+                prompt: `梳理 ${name} 的检查、测试、构建和发布流程，形成清晰的交付清单，指出关键依赖、薄弱环节和验证方式。`,
+                category: "test",
+              },
+              {
+                id: crypto.randomUUID(),
+                title: "整理待办与风险",
+                description: "按影响和优先级形成行动清单。",
+                prompt: `分析 ${name} 的近期任务、待办和潜在风险，按影响和紧急程度分类，形成包含负责人建议、验收标准和下一步的行动清单。`,
+                category: "quality",
+              },
+            ],
+      };
+      state.suggestionDecks.set(key, deck);
+      return structuredClone(deck);
+    },
+    mark_project_suggestion_used: () => {
+      // The production command records this for the next generation context.
+    },
     permission_respond: (a) => {
       pendingPermission = a.decision as string;
     },
     default_system_prompt: () => "你是铁铁汁（Tietiezhi），一个运行在用户桌面上的智能体助手。……",
+
+    // --- Tietiezhi device fabric ---
+    list_device_cores: () => structuredClone(state.deviceCores),
+    add_device_core: async (a) => {
+      await sleep(450);
+      const online = !String(a.baseUrl).includes("offline");
+      const core: DeviceCore = {
+        id: crypto.randomUUID(),
+        name: String(a.name),
+        baseUrl: String(a.baseUrl).replace(/\/$/, ""),
+        createdAt: Date.now(),
+        online,
+        latencyMs: online ? 26 : undefined,
+        deviceCount: 0,
+        lastError: online ? "" : "模拟 Core 当前离线",
+        hasToken: Boolean(a.accessToken),
+      };
+      state.deviceCores.push(core);
+      state.devices.push({
+        id: `core:${core.id}`,
+        nativeId: core.id,
+        name: core.name,
+        platform: "core",
+        coreId: core.id,
+        coreName: core.name,
+        role: "core",
+        online,
+        capabilities: ["core.health", "core.devices"],
+      });
+      return structuredClone(core);
+    },
+    remove_device_core: (a) => {
+      state.deviceCores = state.deviceCores.filter((core) => core.id !== a.id);
+      state.devices = state.devices.filter((device) => device.coreId !== a.id);
+    },
+    probe_device_core: (a) => {
+      const core = state.deviceCores.find((candidate) => candidate.id === a.id);
+      if (!core) throw "设备 Core 不存在";
+      return structuredClone(core);
+    },
+    list_connected_devices: () => structuredClone(state.devices),
+    invoke_device: async (a) => {
+      await sleep(520);
+      const device = state.devices.find((candidate) => candidate.id === a.deviceId);
+      if (!device) throw "设备不存在或已经离线";
+      if (!device.online) throw "目标设备当前离线";
+      const capability = String(a.capability);
+      if (!device.capabilities.includes(capability)) {
+        throw `设备尚未声明能力：${capability}`;
+      }
+      const output = capability === "core.health"
+        ? { online: true, latencyMs: 18, devices: 2 }
+        : capability === "system.status"
+          ? {
+              name: device.name,
+              platform: device.platform,
+              battery: device.platform === "android" ? 82 : undefined,
+              capabilities: device.capabilities,
+              at: Date.now(),
+            }
+          : capability === "system.ping"
+            ? { reply: "pong", at: Date.now() }
+            : { accepted: true, capability, device: device.name };
+      return {
+        requestId: crypto.randomUUID(),
+        deviceId: device.id,
+        capability,
+        ok: true,
+        output,
+        message: `“${device.name}”已完成调用`,
+        durationMs: 42,
+      };
+    },
 
     load_settings: () => structuredClone(state.settings),
     save_settings: (a) => {
@@ -462,8 +1054,99 @@ export function installTauriMock(): void {
       if (provider) provider.models = structuredClone(models);
       return models;
     },
+    generate_create_image: async (a) => {
+      const request = a.request as {
+        providerId?: string;
+        model?: string;
+        prompt?: string;
+        resultCount?: number;
+      };
+      const prompt = String(request.prompt ?? "").trim();
+      if (!prompt) throw "请先填写创意描述或图片节点指令";
+      await sleep(650);
+      const count = Math.min(4, Math.max(1, Number(request.resultCount) || 1));
+      const providerId = request.providerId || "builtin-official";
+      const model = request.model || "gpt-image-2";
+      return Array.from({ length: count }, (_, index) => {
+        const label = escapeXml(prompt.slice(0, 34));
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900"><defs><linearGradient id="sky" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#172033"/><stop offset="1" stop-color="#66513d"/></linearGradient><linearGradient id="light" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#d3a86a"/><stop offset="1" stop-color="#f1dfbd"/></linearGradient></defs><rect width="1200" height="900" fill="url(#sky)"/><circle cx="930" cy="220" r="150" fill="#f3dfb3" opacity=".86"/><path d="M0 720L250 470L470 670L710 350L1200 760V900H0Z" fill="#20293a"/><path d="M0 790L360 570L610 760L870 520L1200 780V900H0Z" fill="url(#light)" opacity=".82"/><rect x="64" y="68" width="520" height="98" rx="20" fill="#0b101c" opacity=".72"/><text x="98" y="126" fill="#f8f4ec" font-family="sans-serif" font-size="31" font-weight="600">${label}</text><text x="99" y="151" fill="#c9c3b9" font-family="sans-serif" font-size="17">开发预览 ${index + 1} · ${escapeXml(model)}</text></svg>`;
+        return {
+          providerId,
+          model,
+          filePath: "",
+          mimeType: "image/svg+xml",
+          revisedPrompt: prompt,
+          previewDataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+        };
+      });
+    },
+    generate_create_video: (a) =>
+      streamCreateVideo(
+        a.requestId as number,
+        a.onEvent as MockChannel,
+        a.request as {
+          providerId?: string;
+          model?: string;
+          durationSeconds?: number;
+        },
+      ),
+    cancel_create_generation: (a) => state.cancelled.add(a.requestId as number),
+    export_create_asset: (a) => a.filePath as string,
+    delete_create_asset: () => {},
 
+    tietiezhi_stream: (a) => {
+      const messages = a.messages as {
+        content: string | { type: string; text?: string }[];
+      }[];
+      const content = messages[messages.length - 1]?.content ?? "";
+      const last =
+        typeof content === "string"
+          ? content
+          : (content.find((part) => part.type === "text")?.text ?? "[附件]");
+      return stream(
+        a.requestId as number,
+        a.onEvent as MockChannel,
+        `收到。当前连接的是 ${String(a.deviceName)}。\n\n${last}`,
+        "mock-tietiezhi",
+      );
+    },
     chat_stream: (a) => {
+      if (a.contextAction === "inspect" || a.contextAction === "compact") {
+        const channel = a.onEvent as MockChannel;
+        const model = a.model as string;
+        push(channel, 0, { message: { type: "started", model } });
+        if (a.contextAction === "inspect") {
+          push(channel, 1, {
+            message: {
+              type: "contextUsage",
+              estimatedTokens: 48_320,
+              contextWindow: 256 * 1024,
+              compactAtTokens: Math.floor((256 * 1024 * 80) / 100),
+            },
+          });
+        } else {
+          push(channel, 1, {
+            message: {
+              type: "contextCompactionStarted",
+              automatic: false,
+              estimatedTokens: 48_320,
+              contextWindow: 256 * 1024,
+            },
+          });
+          push(channel, 2, {
+            message: {
+              type: "contextCompacted",
+              automatic: false,
+              summary: "## 目标\n- 继续当前工作区任务\n\n## 下一步\n1. 根据用户下一条消息继续",
+              estimatedTokensBefore: 48_320,
+              estimatedTokensAfter: 1_280,
+              contextWindow: 256 * 1024,
+            },
+          });
+        }
+        push(channel, 3, { message: { type: "done", cancelled: false } });
+        return;
+      }
       const messages = a.messages as {
         content: string | { type: string; text?: string }[];
       }[];
@@ -494,6 +1177,7 @@ export function installTauriMock(): void {
           a.requestId as number,
           a.onEvent as MockChannel,
           a.model as string,
+          a.taskMode === "work" ? "work" : "code",
         );
       }
       // Markdown-shaped so the renderer (headings / lists / tables / fenced
@@ -553,6 +1237,7 @@ public class Hello {
           title: c.title,
           updatedAt: c.updatedAt,
           projectId: c.projectId ?? "",
+          taskMode: c.taskMode ?? "code",
           archivedAt: 0,
           pinnedAt: c.pinnedAt ?? 0,
         }))
@@ -565,6 +1250,7 @@ public class Hello {
           title: c.title,
           updatedAt: c.updatedAt,
           projectId: c.projectId ?? "",
+          taskMode: c.taskMode ?? "code",
           archivedAt: c.archivedAt,
           pinnedAt: c.pinnedAt ?? 0,
         }))
@@ -627,6 +1313,49 @@ public class Hello {
       }
       return count;
     },
+    task_workspace_overview: (a) => {
+      const conversation = state.conversations.get(a.taskId as string);
+      const initializedMode = conversation?.taskMode ?? "code";
+      return {
+        work: {
+          mode: "work",
+          initialized: initializedMode === "work" || Boolean(conversation),
+          rootPath: "/mock/tasks/work",
+          isGit: false,
+          fileCount: 4,
+          fileCountCapped: false,
+          changedFiles: [],
+          deliverables: [
+            { path: "竞品调研.md", size: 8_420, modifiedAt: Date.now() },
+            { path: "数据汇总.csv", size: 2_180, modifiedAt: Date.now() - 2_000 },
+          ],
+          transferableFiles: [
+            { path: "竞品调研.md", size: 8_420, modifiedAt: Date.now() },
+            { path: "数据汇总.csv", size: 2_180, modifiedAt: Date.now() - 2_000 },
+          ],
+        },
+        code: {
+          mode: "code",
+          initialized: initializedMode === "code" || Boolean(conversation),
+          rootPath: "/mock/tasks/code",
+          isGit: true,
+          fileCount: 128,
+          fileCountCapped: false,
+          changedFiles: ["src/App.tsx", "src/lib/task-mode.ts"],
+          deliverables: [],
+          transferableFiles: [
+            { path: "src/App.tsx", size: 5_120, modifiedAt: Date.now() },
+            {
+              path: "src/lib/task-mode.ts",
+              size: 1_280,
+              modifiedAt: Date.now() - 1_000,
+            },
+          ],
+        },
+      };
+    },
+    transfer_task_workspace_file: (a) =>
+      `.tietiezhi/imports/${String(a.fromMode)}/${String(a.path)}`,
 
     "plugin:app|version": () => "0.0.0-mock",
     "plugin:event|listen": () => 0,

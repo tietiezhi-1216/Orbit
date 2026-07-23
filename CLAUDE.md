@@ -53,9 +53,9 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 ### 前端（`desktop/src/`）
 
 - **`components/ui/`** —— shadcn 生成的组件，原则上不手改（升级用 CLI 重拉）。
-- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏：新建任务 + 无项目任务 + 可折叠项目/任务列表 + 左下角设置入口）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
-- **`features/`** —— 按功能分模块：`chat/`（聊天页 + 顶栏模型选择器 `model-select.tsx`）、`settings/`（设置页，含中转站接入配置/外观/关于）。
-- **`stores/`** —— zustand：`ui.ts`（当前页面，**无路由库**，chat/settings 两页用状态切换）、`chat.ts`（会话列表 + 当前消息 + 流式发送；会话文件读写经模块级串行队列防乱序）。
+- **`components/`** —— 业务通用组件：`app-sidebar.tsx`（侧边栏：顶层功能区切换 + 工作区任务列表 + 左下角设置入口）、`product-area-switcher.tsx`（铁铁汁 / 工作区 / Automations / Create）、`workspace-mode-switcher.tsx`（工作区内 Work / Code 切换）、`theme-provider.tsx`（浅色/深色/跟随系统，class 策略 + localStorage，key=`tietiezhi-theme`）。
+- **`features/`** —— 按功能分模块：`chat/`（聊天页 + Work / Code）、`create/`（图片 / 视频创作、生成记录与本地资产）、`automations/`（自动化编辑与运行）、`settings/`（设置页）。
+- **`stores/`** —— zustand：`ui.ts`（当前功能区与页面状态，**无路由库**）、`chat.ts`（会话与流式发送）、`create.ts`（图片 / 视频草稿、任务与资产）、`automations.ts`（自动化状态）。
 - **`lib/`** —— `utils.ts`（`cn()`）等工具与 API 封装。
 - 应用标识：产品名 `Tietiezhi`，identifier `com.tietiezhi.tietiezhi`，窗口标题「铁铁汁」。
 
@@ -63,12 +63,12 @@ pnpm tauri icon ../assets/brand/tietiezhi-mark.png   # 重新生成全套图标
 
 - `src/main.rs` 只是入口；逻辑在 `src/lib.rs`（`run()`）。
 - commands 按域拆分在 `src/commands/`；密钥存取封装在 `src/secrets.rs`（keyring，service = `com.tietiezhi.tietiezhi`）。
-- **Agent 体系**（2026-07-16）：`src/agent/`（工具调用环路 `loop_.rs`、事件 `events.rs`、默认系统提示词 `prompt.rs`）、`src/tools/`（内置工具 read_file/write_file/edit_file/list_dir/glob/grep/bash/fetch/skill，路径 jail 限制在当前工作目录内）、`src/permission/`（三模式 ask/auto/full，PermissionBroker oneshot 阻塞等前端 `permission_respond`）、`src/skills/`（`app_data_dir()/skills/{name}/SKILL.md`，Anthropic 规范）、`src/mcp/`（基于官方 rmcp SDK 的 stdio + streamable HTTP 客户端，配置存 settings，工具名 `mcp__{server}__{tool}`）。`skill` 仅在本轮存在已启用且当前智能体可访问的技能时暴露，参数枚举和执行端都限制为真实可用名称；没有可用技能时，提示词明确区分 Skills 与内置工具。智能体档案存 `app_config_dir()/agents.json`（提示词/模型覆盖/skills/MCP/工具/权限模式）；绑定项目的任务直接以项目目录为工作目录，未绑定项目的任务使用 `app_data_dir()/tasks/{task_id}/workspace` 空白托管目录。注意 rmcp 依赖 reqwest 0.13，与主工程 0.12 并存（Cargo.toml 里别名 `reqwest13`）。
+- **Agent 体系**（2026-07-16）：`src/agent/`（工具调用环路 `loop_.rs`、事件 `events.rs`、默认系统提示词 `prompt.rs`）、`src/tools/`（内置工具 read_file/write_file/edit_file/list_dir/glob/grep/bash/fetch/skill，路径 jail 限制在当前工作目录内）、`src/permission/`（三模式 ask/auto/full，PermissionBroker oneshot 阻塞等前端 `permission_respond`）、`src/skills/`（`app_data_dir()/skills/{name}/SKILL.md`，Anthropic 规范）、`src/mcp/`（基于官方 rmcp SDK 的 stdio + streamable HTTP 客户端，配置存 settings，工具名 `mcp__{server}__{tool}`）。`skill` 仅在本轮存在已启用且当前智能体可访问的技能时暴露，参数枚举和执行端都限制为真实可用名称；没有可用技能时，提示词明确区分 Skills 与内置工具。智能体档案存 `app_config_dir()/agents.json`（提示词/模型覆盖/skills/MCP/工具/权限模式）。工作区中的同一个任务共享消息和上下文，但 Work / Code 分别使用 `app_data_dir()/tasks/{task_id}/workspaces/{work|code}`：Git 项目按模式创建独立 worktree，普通项目按模式创建独立目录快照，未绑定项目则创建空白托管目录。Work 默认面向研究与成果交付，不暴露通用 `bash`；Code 保留完整开发工具面。工具不仅在模型请求中按模式过滤，执行环路也必须再次校验，禁止模型构造未暴露工具调用。注意 rmcp 依赖 reqwest 0.13，与主工程 0.12 并存（Cargo.toml 里别名 `reqwest13`）。
 - 首次启动不预置供应商、baseURL 或 API Key；所有模型服务均由用户在设置中添加。请求类命令（聊天/模型列表）在 Rust 侧从 settings/keyring 解析连接信息，前端不回传连接信息。
 - **模型能力**：`shared/model-registry/models.json` 是内置兜底注册表；运行时按「用户覆盖 > 渠道 `/v1/models` 扩展元数据 > 内置注册表 > 名称推断」解析输入/输出模态、工具调用和思考等级。用户覆盖与自动识别分开持久化，刷新模型列表不得清除。MCP 通过原生 function calling 暴露，不支持或能力未知的模型以纯对话运行。Reasoning Effort 在 UI 中统一使用英文值（Auto / Low / Medium / High 等）。
 - 设置（baseURL、默认模型等非敏感项）以 JSON 存 `app_config_dir()/settings.json`；**API Key 只进钥匙串**。
-- **任务记录**在 `src/commands/conversations.rs`：每个任务存于 `app_data_dir()/tasks/{uuid}/task.json`；绑定项目时直接使用项目目录，未绑定时工作目录为同级 `workspace/`。id 由前端 `crypto.randomUUID()` 生成并由 Rust 严格校验，`updated_at` 由 Rust 落盘时生成。归档只设置 `archived_at` 并保留完整目录，可在设置中恢复；`pinned_at` 控制侧边栏独立置顶分组；永久删除才清理任务目录。旧 `conversations/{uuid}.json` 与 `workspaces/{uuid}` 启动时自动迁移。
-- **项目列表**在 `src/commands/projects.rs`：持久化到 `app_data_dir()/projects.json`，支持重命名和打开真实目录；任务可不绑定项目。项目可以是普通文件夹或 Git 仓库，Agent 直接在用户选择的目录中工作；项目真实目录永不随任务删除。
+- **任务记录**在 `src/commands/conversations.rs`：每个任务存于 `app_data_dir()/tasks/{uuid}/task.json`，包含共享消息、项目绑定和当前 `task_mode`；旧记录缺少该字段时默认 Code。切换 Work / Code 不创建新任务，只改变下一轮 Agent 使用的独立执行空间。`task_workspace_overview` 只读扫描两种空间的成果、Git 变更和可交接文件；`transfer_task_workspace_file` 将用户明确选择的文件复制到目标空间 `.tietiezhi/imports/{来源模式}/`，不自动同步或覆盖项目文件。id 由前端 `crypto.randomUUID()` 生成并由 Rust 严格校验，`updated_at` 由 Rust 落盘时生成。归档只设置 `archived_at` 并保留完整目录，可在设置中恢复；`pinned_at` 控制侧边栏独立置顶分组；永久删除才清理任务目录及其 worktree。旧 `conversations/{uuid}.json` 与 `workspaces/{uuid}` 启动时自动迁移，旧版单 `workspace/` 优先迁入 Code 空间。
+- **项目列表**在 `src/commands/projects.rs`：持久化到 `app_data_dir()/projects.json`，支持重命名和打开真实目录；任务可不绑定项目。项目可以是普通文件夹或 Git 仓库，Agent 在首次进入对应模式时从所选项目创建隔离执行空间，不直接修改用户选择的原目录；项目真实目录永不随任务删除。
 - baseURL 归一化：用户填 `https://x.com` 或 `https://x.com/v1` 都可以，Rust 侧统一补 `/v1` 前缀后拼端点。
 - 聊天走 OpenAI 兼容 `/v1/chat/completions`（`stream: true`），SSE 解析在 Rust 侧完成，经 `tauri::ipc::Channel` 把 `{type: delta|done|error}` 事件推给前端；解析器有 `cargo test` 单元测试。
 - 能力声明在 `capabilities/default.json`（当前仅 `core:default`）。新增系统能力时先想想是否真的需要新权限。

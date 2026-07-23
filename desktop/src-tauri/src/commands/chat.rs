@@ -2,11 +2,13 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio_util::sync::CancellationToken;
 
 use super::models::{classify, ModelInfo, ModelKind, ModelModality, ReasoningEffort};
+use super::workspace::TaskMode;
 use super::{api_url, providers, snippet};
+use crate::agent::context::ContextAction;
 use crate::agent::failure::ChatFailure;
 use crate::AppState;
 
@@ -102,14 +104,20 @@ pub async fn chat_stream(
     conversation_id: Option<String>,
     agent_id: Option<String>,
     project_id: Option<String>,
+    task_mode: Option<TaskMode>,
+    context_action: Option<String>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
+    let context_action = ContextAction::from_wire(context_action.as_deref())?;
     let cancel = CancellationToken::new();
-    state
+    if let Some(previous) = state
         .chat_cancels
         .lock()
         .unwrap()
-        .insert(request_id, cancel.clone());
+        .insert(request_id, cancel.clone())
+    {
+        previous.cancel();
+    }
 
     // An agent may pin both its provider and model. Legacy agent profiles only
     // stored the model, in which case the chat's current provider remains in use.
@@ -137,6 +145,7 @@ pub async fn chat_stream(
                 agent_id.as_deref(),
                 project_id.as_deref(),
                 conversation_id.as_deref(),
+                task_mode.unwrap_or_default(),
             ) {
                 Ok(env) => {
                     let model_info = resolved
@@ -145,7 +154,8 @@ pub async fn chat_stream(
                         .find(|candidate| candidate.id == model);
                     match ensure_chat_model(&model, model_info) {
                         Ok(())
-                            if messages_contain_images(&messages)
+                            if context_action == ContextAction::Chat
+                                && messages_contain_images(&messages)
                                 && !model_info.is_some_and(|info| {
                                     info.accepts_modality(ModelModality::Image)
                                 }) =>
@@ -171,6 +181,7 @@ pub async fn chat_stream(
                                 reasoning_effort,
                                 messages,
                                 env,
+                                context_action,
                                 &cancel,
                                 &on_event,
                             )
@@ -188,6 +199,101 @@ pub async fn chat_stream(
     state.chat_cancels.lock().unwrap().remove(&request_id);
     state.permissions.end_session(request_id);
 
+    let final_event = match result {
+        Ok(cancelled) => ChatEvent::Done { cancelled },
+        Err(failure) => ChatEvent::Error {
+            message: failure.summary,
+            detail: failure.detail,
+            code: failure.code,
+            status: failure.status,
+            retryable: failure.retryable,
+            retries: failure.retries,
+        },
+    };
+    let _ = on_event.send(final_event);
+    Ok(())
+}
+
+/// The single Tietiezhi companion timeline. It uses the configured chat model
+/// but exposes only the cross-device tool, keeping this surface separate from
+/// project Work/Code tools and workspaces.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn tietiezhi_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request_id: u32,
+    device_id: String,
+    device_name: String,
+    messages: Vec<ChatMessage>,
+    on_event: Channel<ChatEvent>,
+) -> Result<(), String> {
+    let cancel = CancellationToken::new();
+    state
+        .chat_cancels
+        .lock()
+        .unwrap()
+        .insert(request_id, cancel.clone());
+
+    let result: Result<bool, ChatFailure> = async {
+        let settings = super::settings::read_settings(&app).map_err(ChatFailure::message)?;
+        if settings.chat_provider_id.trim().is_empty() || settings.chat_model.trim().is_empty() {
+            return Err(ChatFailure::message("请先在设置中配置对话模型"));
+        }
+        let resolved = providers::resolve(&app, &settings.chat_provider_id)
+            .map_err(ChatFailure::message)?;
+        let model = settings.chat_model;
+        let model_info = resolved
+            .models
+            .iter()
+            .find(|candidate| candidate.id == model);
+        ensure_chat_model(&model, model_info).map_err(ChatFailure::message)?;
+
+        let workspace = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| ChatFailure::message(format!("无法定位数据目录：{error}")))?
+            .join("tietiezhi");
+        std::fs::create_dir_all(&workspace)
+            .map_err(|error| ChatFailure::message(format!("创建铁铁汁空间失败：{error}")))?;
+        let system_prompt = format!(
+            "你是铁铁汁，一个长期陪伴用户的个人 Agent。保持自然、简洁，不使用产品宣传语。\n\n当前用户在右上角选择的目标设备是“{device_name}”，设备 ID 必须原样使用：{device_id}。当用户明确要求查看或操作设备时，只能调用 device_call；不要编造设备状态或声称未执行的操作已经完成。普通交流无需调用工具。"
+        );
+        let env = crate::agent::loop_::AgentEnv {
+            system_prompt,
+            allowed_tools: vec!["device_call".into()],
+            available_skills: Vec::new(),
+            permission_mode: crate::permission::PermissionMode::Ask,
+            mcp_configs: Vec::new(),
+            workspace,
+        };
+        let reasoning_effort = ReasoningEffort::from_setting(&settings.chat_reasoning_effort);
+        let _ = on_event.send(ChatEvent::Started {
+            model: model.clone(),
+        });
+        crate::agent::loop_::run_agent_loop(
+            &app,
+            &state.http,
+            &state.permissions,
+            &state.mcp,
+            request_id,
+            &resolved.base_url,
+            resolved.key.as_deref(),
+            &model,
+            model_info,
+            reasoning_effort,
+            messages,
+            env,
+            ContextAction::Disabled,
+            &cancel,
+            &on_event,
+        )
+        .await
+    }
+    .await;
+
+    state.chat_cancels.lock().unwrap().remove(&request_id);
+    state.permissions.end_session(request_id);
     let final_event = match result {
         Ok(cancelled) => ChatEvent::Done { cancelled },
         Err(failure) => ChatEvent::Error {

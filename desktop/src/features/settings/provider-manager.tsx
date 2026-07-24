@@ -8,6 +8,7 @@ import {
   FileText,
   ImageIcon,
   Loader2,
+  LogIn,
   Pencil,
   Plus,
   PlugZap,
@@ -16,6 +17,7 @@ import {
   Save,
   Settings2,
   Trash2,
+  UserRound,
   Video,
   Volume2,
   Wrench,
@@ -53,6 +55,9 @@ import {
   deleteProvider,
   errorMessage,
   fetchProviderModels,
+  gatewayAccount,
+  gatewayLogin,
+  gatewayLogout,
   listProviders,
   providerKey,
   upsertProvider,
@@ -505,6 +510,42 @@ export function ProviderManager() {
   const providers = providersQuery.data ?? [];
   const builtInProvider = providers.find((provider) => provider.builtIn);
   const customProviders = providers.filter((provider) => !provider.builtIn);
+  const gatewayAccountQuery = useQuery({
+    queryKey: ["gateway-account", builtInProvider?.id],
+    queryFn: () => gatewayAccount(builtInProvider!.id),
+    enabled: Boolean(builtInProvider),
+    retry: false,
+  });
+  const gatewayLoginMutation = useMutation({
+    mutationFn: async () => {
+      if (!builtInProvider) throw new Error("未找到 Tietiezhi Gateway");
+      const account = await gatewayLogin(builtInProvider.id);
+      await fetchProviderModels({
+        id: builtInProvider.id,
+        baseUrl: builtInProvider.baseUrl,
+        kind: builtInProvider.type,
+      });
+      return account;
+    },
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({
+        queryKey: ["gateway-account", builtInProvider?.id],
+      });
+    },
+  });
+  const gatewayLogoutMutation = useMutation({
+    mutationFn: async () => {
+      if (!builtInProvider) return;
+      await gatewayLogout(builtInProvider.id);
+    },
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({
+        queryKey: ["gateway-account", builtInProvider?.id],
+      });
+    },
+  });
   const refreshBuiltIn = useMutation({
     mutationFn: async () => {
       if (!builtInProvider) throw new Error("未找到 Tietiezhi Gateway");
@@ -527,7 +568,7 @@ export function ProviderManager() {
       <div className="flex flex-col gap-5">
         {builtInProvider && (
           <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-4 rounded-xl border px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border px-4 py-3.5">
               <img
                 src="/gateway/tietiezhi-gateway.png"
                 alt="Tietiezhi Gateway"
@@ -537,12 +578,49 @@ export function ProviderManager() {
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <span className="truncate text-sm font-semibold">Tietiezhi Gateway</span>
                 <span className="text-muted-foreground text-xs">
-                  {summarizeModels(builtInProvider.models)}
+                  {gatewayAccountQuery.data?.loggedIn
+                    ? gatewayAccountQuery.data.account?.email
+                    : gatewayAccountQuery.data?.supported === false
+                      ? "当前中转站未提供账号登录；仍可使用"
+                      : "登录后使用当前中转站账号；不登录仍可使用"}
                 </span>
               </div>
-              <span className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                免费
-              </span>
+              {gatewayAccountQuery.data?.loggedIn ? (
+                <>
+                  <span className="flex shrink-0 items-center gap-1.5 text-sm font-medium">
+                    <UserRound className="size-4" />
+                    {gatewayAccountQuery.data.account?.nickname ||
+                      gatewayAccountQuery.data.account?.email}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={gatewayLogoutMutation.isPending}
+                    onClick={() => gatewayLogoutMutation.mutate()}
+                  >
+                    {gatewayLogoutMutation.isPending && (
+                      <Loader2 className="animate-spin" />
+                    )}
+                    退出
+                  </Button>
+                </>
+              ) : gatewayAccountQuery.data?.supported !== false ? (
+                <Button
+                  size="sm"
+                  disabled={
+                    gatewayLoginMutation.isPending ||
+                    gatewayAccountQuery.isLoading
+                  }
+                  onClick={() => gatewayLoginMutation.mutate()}
+                >
+                  {gatewayLoginMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <LogIn />
+                  )}
+                  登录中转站
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -565,6 +643,14 @@ export function ProviderManager() {
               <Alert variant="destructive">
                 <AlertTitle>刷新模型列表失败</AlertTitle>
                 <AlertDescription>{errorMessage(refreshBuiltIn.error)}</AlertDescription>
+              </Alert>
+            )}
+            {gatewayLoginMutation.isError && (
+              <Alert variant="destructive">
+                <AlertTitle>登录失败</AlertTitle>
+                <AlertDescription>
+                  {errorMessage(gatewayLoginMutation.error)}
+                </AlertDescription>
               </Alert>
             )}
           </div>

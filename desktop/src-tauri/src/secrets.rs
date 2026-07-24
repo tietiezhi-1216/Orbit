@@ -22,6 +22,18 @@ fn device_core_account(core_id: &str) -> String {
     format!("device-core-{core_id}")
 }
 
+fn gateway_session_account(provider_id: &str) -> String {
+    format!("gateway-session-{provider_id}")
+}
+
+fn gateway_api_key_account(provider_id: &str) -> String {
+    format!("gateway-api-key-{provider_id}")
+}
+
+fn gateway_issuer_account(provider_id: &str) -> String {
+    format!("gateway-issuer-{provider_id}")
+}
+
 // MARK: - Public API (backend-agnostic)
 
 pub fn set_provider_key(provider_id: &str, value: &str) -> Result<(), String> {
@@ -34,6 +46,42 @@ pub fn get_provider_key(provider_id: &str) -> Result<Option<String>, String> {
 
 pub fn delete_provider_key(provider_id: &str) -> Result<(), String> {
     backend::delete(&provider_account(provider_id))
+}
+
+pub fn set_gateway_session(provider_id: &str, value: &str) -> Result<(), String> {
+    backend::set(&gateway_session_account(provider_id), value)
+}
+
+pub fn get_gateway_session(provider_id: &str) -> Result<Option<String>, String> {
+    backend::get(&gateway_session_account(provider_id))
+}
+
+pub fn delete_gateway_session(provider_id: &str) -> Result<(), String> {
+    backend::delete(&gateway_session_account(provider_id))
+}
+
+pub fn set_gateway_api_key(provider_id: &str, value: &str) -> Result<(), String> {
+    backend::set(&gateway_api_key_account(provider_id), value)
+}
+
+pub fn get_gateway_api_key(provider_id: &str) -> Result<Option<String>, String> {
+    backend::get(&gateway_api_key_account(provider_id))
+}
+
+pub fn delete_gateway_api_key(provider_id: &str) -> Result<(), String> {
+    backend::delete(&gateway_api_key_account(provider_id))
+}
+
+pub fn set_gateway_issuer(provider_id: &str, value: &str) -> Result<(), String> {
+    backend::set(&gateway_issuer_account(provider_id), value)
+}
+
+pub fn get_gateway_issuer(provider_id: &str) -> Result<Option<String>, String> {
+    backend::get(&gateway_issuer_account(provider_id))
+}
+
+pub fn delete_gateway_issuer(provider_id: &str) -> Result<(), String> {
+    backend::delete(&gateway_issuer_account(provider_id))
 }
 
 pub fn set_device_core_token(core_id: &str, value: &str) -> Result<(), String> {

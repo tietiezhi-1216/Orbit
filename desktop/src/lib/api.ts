@@ -3,11 +3,7 @@ import type { TaskMode } from "@/lib/task-mode";
 
 export type ProviderType = "openai" | "mimo";
 
-/**
- * What a model can be used for. `/v1/models` carries no capability metadata, so
- * Rust derives this from the model id (see commands/models.rs) — the same
- * name-based fallback the relay itself uses.
- */
+/** What a model can be used for. Rust merges provider metadata with local fallbacks. */
 export type ModelKind =
   | "chat"
   | "asr"
@@ -79,6 +75,21 @@ export interface Provider {
 
 export interface ProviderView extends Provider {
   hasKey: boolean;
+}
+
+export interface GatewayAccount {
+  userId: number;
+  email: string;
+  nickname: string;
+  avatar: string;
+}
+
+export interface GatewayAccountView {
+  providerId: string;
+  supported: boolean;
+  loggedIn: boolean;
+  account?: GatewayAccount;
+  expires?: number;
 }
 
 export type PermissionMode = "ask" | "auto" | "full";
@@ -582,6 +593,18 @@ export function fetchProviderModels(args: FetchModelsArgs): Promise<ModelInfo[]>
     kind: args.kind ?? null,
     apiKey: args.apiKey ?? null,
   });
+}
+
+export function gatewayAccount(providerId: string): Promise<GatewayAccountView> {
+  return invoke<GatewayAccountView>("gateway_account", { providerId });
+}
+
+export function gatewayLogin(providerId: string): Promise<GatewayAccountView> {
+  return invoke<GatewayAccountView>("gateway_login", { providerId });
+}
+
+export function gatewayLogout(providerId: string): Promise<void> {
+  return invoke("gateway_logout", { providerId });
 }
 
 // MARK: - Create

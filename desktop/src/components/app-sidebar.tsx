@@ -50,6 +50,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { ProductAreaSwitcher } from "@/components/product-area-switcher";
+import { GatewayAccountButton } from "@/components/gateway-account-button";
 import { Separator } from "@/components/ui/separator";
 import {
   dictationHotkey,
@@ -428,6 +429,8 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="gap-1">
+        <GatewayAccountButton />
+        <Separator className="my-0.5" />
         <DictationStatus onClick={() => openSettings("dictationModel")} />
         <Separator className="my-0.5" />
         <SidebarMenu>

@@ -30,6 +30,28 @@ pub(crate) struct Resolved {
     pub models: Vec<ModelInfo>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProviderReasoning {
+    mode: ReasoningMode,
+    #[serde(default)]
+    supported_efforts: Vec<ReasoningEffort>,
+    #[serde(default)]
+    default_effort: Option<ReasoningEffort>,
+    transport: ReasoningTransport,
+}
+
+fn apply_provider_reasoning(model: &mut ModelInfo, reasoning: ProviderReasoning) {
+    if !model.capabilities.contains(&ModelCapability::Reasoning) {
+        model.capabilities.push(ModelCapability::Reasoning);
+    }
+    model.reasoning = Some(ReasoningProfile {
+        mode: reasoning.mode,
+        supported_efforts: reasoning.supported_efforts,
+        default_effort: reasoning.default_effort,
+        transport: reasoning.transport,
+    });
+}
+
 /// Curated fallback catalog per provider type, used when the provider has no
 /// `/v1/models` route (Xiaomi MiMo does not document one).
 fn fallback_models(kind: &str) -> Vec<ModelInfo> {
@@ -63,11 +85,13 @@ pub(crate) fn resolve(app: &AppHandle, provider_id: &str) -> Result<Resolved, St
         .find(|p| p.id == provider_id)
         .ok_or("未找到所选供应商，请到「设置」检查")?;
 
-    let key = secrets::get_provider_key(provider_id)?.or_else(|| {
-        provider
-            .built_in
-            .then(|| BUILTIN_PROVIDER_API_KEY.to_owned())
-    });
+    let key = super::gateway_auth::gateway_api_key(provider_id, &provider.base_url)?
+        .or(secrets::get_provider_key(provider_id)?)
+        .or_else(|| {
+            provider
+                .built_in
+                .then(|| BUILTIN_PROVIDER_API_KEY.to_owned())
+        });
 
     Ok(Resolved {
         base_url: provider.base_url.clone(),
@@ -195,7 +219,9 @@ pub async fn fetch_provider_models(
         .filter(|k| !k.is_empty())
     {
         Some(k) => Some(k),
-        None => secrets::get_provider_key(&id)?,
+        None => {
+            super::gateway_auth::gateway_api_key(&id, &base)?.or(secrets::get_provider_key(&id)?)
+        }
     };
     let key = key.or_else(|| {
         stored
@@ -292,6 +318,8 @@ pub(crate) async fn fetch_models(
         max_output_tokens: Option<u64>,
         #[serde(default)]
         top_provider: Option<TopProvider>,
+        #[serde(default)]
+        reasoning: Option<ProviderReasoning>,
     }
     #[derive(Deserialize)]
     struct ModelArchitecture {
@@ -330,6 +358,11 @@ pub(crate) async fn fetch_models(
         .map(|entry| {
             let mut model = ModelInfo::new(entry.id);
             let mut has_metadata = false;
+
+            if let Some(reasoning) = entry.reasoning {
+                apply_provider_reasoning(&mut model, reasoning);
+                has_metadata = true;
+            }
 
             if let Some(architecture) = entry.architecture {
                 let input = parse_modalities(&architecture.input_modalities);
@@ -438,5 +471,31 @@ mod builtin_tests {
             "builtin-official"
         );
         assert!(!BUILTIN_PROVIDER_API_KEY.trim().is_empty());
+    }
+
+    #[test]
+    fn gateway_reasoning_metadata_overrides_registry_profile() {
+        let reasoning: ProviderReasoning = serde_json::from_str(
+            r#"{
+                "mode":"effort",
+                "supported_efforts":["off","low","high","xhigh"],
+                "default_effort":"high",
+                "transport":"openai-reasoning-effort"
+            }"#,
+        )
+        .unwrap();
+        let mut model = ModelInfo::new("gpt-5.5");
+        apply_provider_reasoning(&mut model, reasoning);
+        let profile = model.reasoning.unwrap();
+        assert_eq!(
+            profile.supported_efforts,
+            vec![
+                ReasoningEffort::Off,
+                ReasoningEffort::Low,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ]
+        );
+        assert_eq!(profile.default_effort, Some(ReasoningEffort::High));
     }
 }

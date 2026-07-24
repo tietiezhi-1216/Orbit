@@ -643,6 +643,7 @@ export function installTauriMock(): void {
     state.cancelled.delete(requestId);
   };
   let pendingPermission: string | null = null;
+  let gatewayLoggedIn = false;
 
   const handlers: Record<string, Handler> = {
     // --- Automation ---
@@ -1053,6 +1054,38 @@ export function installTauriMock(): void {
       const provider = state.settings.providers.find((candidate) => candidate.id === a.id);
       if (provider) provider.models = structuredClone(models);
       return models;
+    },
+    gateway_account: (a) => ({
+      providerId: String(a.providerId ?? "builtin-official"),
+      supported: true,
+      loggedIn: gatewayLoggedIn,
+      account: gatewayLoggedIn
+        ? {
+            userId: 1,
+            email: "demo@example.com",
+            nickname: "Demo",
+            avatar: "",
+          }
+        : undefined,
+      expires: gatewayLoggedIn ? Date.now() + 30 * 24 * 60 * 60 * 1000 : undefined,
+    }),
+    gateway_login: (a) => {
+      gatewayLoggedIn = true;
+      return {
+        providerId: String(a.providerId ?? "builtin-official"),
+        supported: true,
+        loggedIn: true,
+        account: {
+          userId: 1,
+          email: "demo@example.com",
+          nickname: "Demo",
+          avatar: "",
+        },
+        expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      };
+    },
+    gateway_logout: () => {
+      gatewayLoggedIn = false;
     },
     generate_create_image: async (a) => {
       const request = a.request as {

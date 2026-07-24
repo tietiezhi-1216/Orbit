@@ -7,6 +7,7 @@ pub mod conversations;
 pub mod create;
 pub mod devices;
 pub mod dictation;
+pub mod gateway_auth;
 pub mod hotkey;
 pub mod mcp;
 pub mod models;

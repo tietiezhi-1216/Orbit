@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { LoaderCircle, Settings, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { UpdateReadyButton } from "@/components/update-ready-button";
 import {
   SidebarInset,
   SidebarProvider,
@@ -21,6 +22,7 @@ import { SettingsDialog } from "@/features/settings/settings-dialog";
 import { useChatStore } from "@/stores/chat";
 import { useProjectStore } from "@/stores/projects";
 import { useUiStore } from "@/stores/ui";
+import { useUpdaterStore } from "@/stores/updater";
 import { getProductArea } from "@/lib/product-area";
 import type { ProductArea } from "@/lib/product-area";
 
@@ -35,6 +37,7 @@ export default function App() {
   const conversations = useChatStore((s) => s.conversations);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const productArea = useUiStore((s) => s.productArea);
+  const checkAndDownloadUpdate = useUpdaterStore((s) => s.checkAndDownload);
   const title =
     productArea === "workspace"
       ? conversations.find((c) => c.id === activeId)?.title ?? "新建任务"
@@ -49,6 +52,10 @@ export default function App() {
       await useProjectStore.getState().init();
     })();
   }, []);
+
+  useEffect(() => {
+    void checkAndDownloadUpdate();
+  }, [checkAndDownloadUpdate]);
 
   return (
     <SidebarProvider width={`${sidebarWidth}px`}>
@@ -162,6 +169,7 @@ function AppHeader({
           </>
         )}
         {productArea === "tietiezhi" && <TietiezhiDeviceControl />}
+        <UpdateReadyButton />
         {!workspace && (
           <Button
             variant="ghost"

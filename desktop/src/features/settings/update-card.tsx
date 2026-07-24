@@ -1,24 +1,11 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
-import type { Update } from "@tauri-apps/plugin-updater";
-import { CheckCircle2, Download, Loader2, RefreshCw, RotateCw, Store } from "lucide-react";
+import { CheckCircle2, Loader2, RefreshCw, RotateCw, Store } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { errorMessage } from "@/lib/api";
 import { SettingsSection } from "@/features/settings/settings-section";
-
-type UpdateStage =
-  | { kind: "idle" }
-  | { kind: "checking" }
-  | { kind: "none" }
-  | { kind: "available"; update: Update }
-  | { kind: "downloading"; percent: number | null }
-  | { kind: "ready" }
-  | { kind: "error"; message: string };
+import { useUpdaterStore } from "@/stores/updater";
 
 /** In-app updater: check → download & install → relaunch. */
 export function UpdateCard() {
@@ -40,7 +27,13 @@ function MicrosoftStoreUpdateCard() {
 }
 
 function DirectDownloadUpdateCard() {
-  const [stage, setStage] = useState<UpdateStage>({ kind: "idle" });
+  const stage = useUpdaterStore((state) => state.stage);
+  const updateVersion = useUpdaterStore((state) => state.version);
+  const body = useUpdaterStore((state) => state.body);
+  const percent = useUpdaterStore((state) => state.percent);
+  const updateError = useUpdaterStore((state) => state.error);
+  const checkAndDownload = useUpdaterStore((state) => state.checkAndDownload);
+  const applyUpdate = useUpdaterStore((state) => state.applyUpdate);
   const versionQuery = useQuery({
     queryKey: ["appVersion"],
     queryFn: getVersion,
@@ -48,88 +41,65 @@ function DirectDownloadUpdateCard() {
     staleTime: Infinity,
   });
 
-  const runCheck = async () => {
-    setStage({ kind: "checking" });
-    try {
-      const update = await check();
-      setStage(update ? { kind: "available", update } : { kind: "none" });
-    } catch (err) {
-      setStage({ kind: "error", message: errorMessage(err) });
-    }
-  };
-
-  const install = async (update: Update) => {
-    setStage({ kind: "downloading", percent: null });
-    try {
-      let total = 0;
-      let received = 0;
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength ?? 0;
-        } else if (event.event === "Progress") {
-          received += event.data.chunkLength;
-          setStage({
-            kind: "downloading",
-            percent: total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null,
-          });
-        }
-      });
-      setStage({ kind: "ready" });
-    } catch (err) {
-      setStage({ kind: "error", message: errorMessage(err) });
-    }
-  };
-
-  const description =
-    `当前版本 v${versionQuery.data ?? "—"}` +
-    (stage.kind === "available" ? `，发现新版本 v${stage.update.version}` : "") +
-    (stage.kind === "none" ? "，已是最新版本。" : "");
+  const description = [
+    `当前版本 v${versionQuery.data ?? "—"}`,
+    stage === "checking" ? "正在检查更新。" : "",
+    stage === "none" ? "已是最新版本。" : "",
+    stage === "downloading" ? `正在后台下载 v${updateVersion}。` : "",
+    stage === "ready" ? `v${updateVersion} 已下载完成。` : "",
+    stage === "installing" ? `正在安装 v${updateVersion}。` : "",
+    stage === "restart" ? `v${updateVersion} 已安装，等待重启。` : "",
+  ]
+    .filter(Boolean)
+    .join("，");
 
   return (
     <SettingsSection description={description}>
-      {stage.kind === "available" && stage.update.body && (
-        <p className="text-muted-foreground text-sm whitespace-pre-wrap">
-          {stage.update.body}
-        </p>
+      {body && ["downloading", "ready", "installing", "restart"].includes(stage) && (
+        <p className="text-muted-foreground whitespace-pre-wrap text-sm">{body}</p>
       )}
-      {stage.kind === "error" && (
+      {(stage === "error" || updateError) && (
         <Alert variant="destructive">
           <AlertTitle>更新失败</AlertTitle>
-          <AlertDescription>{stage.message}</AlertDescription>
+          <AlertDescription>{updateError}</AlertDescription>
         </Alert>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        {stage.kind === "available" ? (
-          <Button onClick={() => void install(stage.update)}>
-            <Download /> 下载并安装 v{stage.update.version}
-          </Button>
-        ) : stage.kind === "downloading" ? (
+        {stage === "downloading" ? (
           <Button disabled>
             <Loader2 className="animate-spin" />
-            下载中{stage.percent != null ? ` ${stage.percent}%` : "…"}
+            后台下载中{percent != null ? ` ${percent}%` : "…"}
           </Button>
-        ) : stage.kind === "ready" ? (
-          <Button onClick={() => void relaunch()}>
+        ) : stage === "ready" ? (
+          <Button onClick={() => void applyUpdate()}>
+            <RefreshCw /> 更新到 v{updateVersion}
+          </Button>
+        ) : stage === "installing" ? (
+          <Button disabled>
+            <Loader2 className="animate-spin" /> 正在安装
+          </Button>
+        ) : stage === "restart" ? (
+          <Button onClick={() => void applyUpdate()}>
             <RotateCw /> 重启以完成更新
           </Button>
         ) : (
           <Button
             variant="outline"
-            onClick={() => void runCheck()}
-            disabled={stage.kind === "checking"}
+            onClick={() => void checkAndDownload()}
+            disabled={stage === "checking"}
           >
-            {stage.kind === "checking" ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            检查更新
+            {stage === "checking" ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            {stage === "error" ? "重试更新" : "检查更新"}
           </Button>
         )}
-        {stage.kind === "none" && (
+        {stage === "none" && (
           <Badge variant="secondary" className="text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 /> 已是最新
           </Badge>
         )}
-        {stage.kind === "ready" && (
+        {stage === "ready" && (
           <span className="text-muted-foreground text-xs">
-            更新已安装，重启后生效。
+            安装包已下载完成，点击更新后将重启应用。
           </span>
         )}
       </div>
